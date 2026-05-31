@@ -274,6 +274,17 @@
   .lobby-tools{display:flex;gap:10px;flex-wrap:wrap;margin:-4px 0 4px}
   .lobby-tools button{flex:1;min-width:130px;background:#eef0f5;color:#333;padding:11px;font-size:.9rem;box-shadow:none}
 
+  /* avatar picker */
+  .avatar-grid{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .avatar-opt{font-size:1.5rem;width:46px;height:46px;border-radius:12px;background:#eef0f5;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid transparent;transition:.12s}
+  .avatar-opt:hover{transform:scale(1.08)}
+  .avatar-opt.sel{border-color:var(--purple);background:#f0e9ff;transform:scale(1.08)}
+  .chip .av{margin-right:4px}
+  .stand-row .av{font-size:1.2rem;width:24px;text-align:center;flex:none}
+  body.dark .avatar-opt{background:#3a2b54}
+  body.dark .avatar-opt.sel{background:#4a3669}
+
   @media(max-width:540px){
     .answers,.mode-grid{grid-template-columns:1fr}
     .answer .num{display:none}
@@ -293,6 +304,7 @@
       <span class="pill">Vyber režim hry</span>
       <span>
         <span class="sound-toggle icon-btn" id="themeToggle">🌙 Tma</span>
+        <span class="sound-toggle icon-btn" id="musicToggle">🎵 Hudba</span>
         <span class="sound-toggle icon-btn" id="soundToggle">🔊 Zvuk</span>
       </span>
     </div>
@@ -348,6 +360,8 @@
     <div class="seg" id="countSeg"></div>
     <h3>Pořadí otázek</h3>
     <div class="seg" id="shuffleSeg"><button data-s="0" class="on">Podle sady</button><button data-s="1">Náhodně</button></div>
+    <h3>Pořadí odpovědí</h3>
+    <div class="seg" id="ansSeg"><button data-a="0" class="on">Napevno</button><button data-a="1">Zamíchat</button></div>
     <button class="btn-primary" id="startBtn" style="margin-top:18px">▶ Spustit kvíz</button>
   </div>
 
@@ -423,6 +437,7 @@
     <div class="seg" id="hostTimeSeg"><button data-t="10">10 s</button><button data-t="20" class="on">20 s</button><button data-t="30">30 s</button></div>
     <div class="seg" id="hostCountSeg"></div>
     <div class="seg" id="hostShuffleSeg"><button data-s="0" class="on">Podle sady</button><button data-s="1">Náhodně</button></div>
+    <div class="seg" id="hostAnsSeg"><button data-a="0" class="on">Odpovědi napevno</button><button data-a="1">Zamíchat odpovědi</button></div>
     <button class="btn-primary" id="hostStartBtn" disabled>▶ Spustit (potřebuješ ≥1 hráče)</button>
   </div>
 
@@ -437,6 +452,8 @@
     <input type="tel" id="joinPin" placeholder="6místný PIN" maxlength="6" inputmode="numeric" style="font-size:1.6rem;text-align:center;letter-spacing:6px;font-weight:800">
     <label>Tvoje přezdívka</label>
     <input type="text" id="joinName" placeholder="Např. Tonda" maxlength="16">
+    <label>Vyber si avatara</label>
+    <div class="avatar-grid" id="avatarGrid"></div>
     <button class="btn-primary" id="joinGoBtn">Vstoupit do hry →</button>
     <div class="conn-status" id="joinStatus" style="margin-top:10px"></div>
   </div>
@@ -457,6 +474,7 @@
 const STORE_KEY='kvizmania_sets_v2', PREF_KEY='kvizmania_prefs_v1';
 const PLAYER_COLORS=['#e21b3c','#1368ce','#d89e00','#26890c','#9b2fae','#16a3a3','#e8590c','#2b3a67'];
 const SYMBOLS=['▲','◆','●','■'];
+const AVATARS=['🦊','🐼','🐲','🦄','🐙','🦁','🐸','🐵','🐯','🐰','🐨','🐷','🦉','🐝','🦖','🐳','🦋','🐢'];
 
 const DEFAULT_SETS={
   "Všeobecný přehled":[
@@ -498,13 +516,13 @@ function loadBest(){try{return JSON.parse(localStorage.getItem('kvizmania_best')
 function saveBest(b){localStorage.setItem('kvizmania_best',JSON.stringify(b))}
 
 let sets=loadSets();
-let prefs=Object.assign({sound:true,theme:'light',time:20,shuffle:0,players:[{name:'Hráč 1'}]},loadPrefs());
+let prefs=Object.assign({sound:true,music:true,theme:'light',time:20,shuffle:0,shuffleAns:0,avatar:'',players:[{name:'Hráč 1'}]},loadPrefs());
 function applyTheme(){document.body.classList.toggle('dark',prefs.theme==='dark');
   const t=$('themeToggle');if(t)t.textContent=prefs.theme==='dark'?'☀️ Světlo':'🌙 Tma';}
 
 //=================== SCREENS ===================
 const SCREENS=['home','pickset','setup','quiz','feedback','results','editor','lobby','hostStage','join','playStage'];
-function show(id){SCREENS.forEach(s=>document.getElementById(s).classList.toggle('hidden',s!==id));
+function show(id){stopMusic();SCREENS.forEach(s=>document.getElementById(s).classList.toggle('hidden',s!==id));
   const q=document.getElementById('quitBtn');
   if(q)q.classList.toggle('hidden',!['quiz','feedback','hostStage','playStage'].includes(id));}
 const $=id=>document.getElementById(id);
@@ -539,6 +557,20 @@ const sfx={
   join:()=>{beep(523,.1,'sine',.12);beep(784,.14,'sine',.12,.08)},
   win:()=>{[523,659,784,1046].forEach((f,i)=>beep(f,.3,'triangle',.16,i*.12))},
 };
+//=================== TENSION MUSIC ===================
+let musicTimer=null,musicStep=0;
+const MUSIC_NOTES=[294,370,440,370,294,440,494,440];
+function startMusic(){
+  if(!prefs.sound||!prefs.music)return;
+  stopMusic();musicStep=0;
+  musicTimer=setInterval(()=>{
+    const f=MUSIC_NOTES[musicStep%MUSIC_NOTES.length];
+    beep(f,.16,'triangle',.045);
+    if(musicStep%2===0)beep(98,.22,'sine',.05);
+    musicStep++;
+  },250);
+}
+function stopMusic(){if(musicTimer){clearInterval(musicTimer);musicTimer=null;}}
 
 //=================== CONFETTI ===================
 function launchConfetti(){
@@ -577,8 +609,10 @@ function calcGain(elapsed,time,streak){
 }
 
 //=================== MENU ===================
-$('soundToggle').onclick=()=>{prefs.sound=!prefs.sound;savePrefs(prefs);if(prefs.sound)sfx.click();
+$('soundToggle').onclick=()=>{prefs.sound=!prefs.sound;savePrefs(prefs);if(!prefs.sound)stopMusic();else sfx.click();
   $('soundToggle').textContent=prefs.sound?'🔊 Zvuk':'🔇 Zvuk'};
+$('musicToggle').onclick=()=>{prefs.music=!prefs.music;savePrefs(prefs);if(!prefs.music)stopMusic();if(prefs.sound)sfx.click();
+  $('musicToggle').textContent=prefs.music?'🎵 Hudba':'🔇 Hudba'};
 $('themeToggle').onclick=()=>{prefs.theme=prefs.theme==='dark'?'light':'dark';savePrefs(prefs);applyTheme();sfx.click()};
 $('modeSolo').onclick=()=>{pickPurpose='solo';sfx.click();openPickset()};
 $('modeHost').onclick=()=>{
@@ -587,7 +621,16 @@ $('modeHost').onclick=()=>{
 $('modeJoin').onclick=()=>{
   if(!window.Peer){toast('Online režim potřebuje internet (knihovna se nenačetla).');return;}
   sfx.click();$('joinStatus').textContent='';$('joinPin').value='';$('joinName').value=prefs.nick||'';
-  show('join');setTimeout(()=>$('joinPin').focus(),100);};
+  renderAvatarGrid();show('join');setTimeout(()=>$('joinPin').focus(),100);};
+let selectedAvatar=null;
+function renderAvatarGrid(){
+  selectedAvatar=prefs.avatar&&AVATARS.includes(prefs.avatar)?prefs.avatar:AVATARS[Math.floor(Math.random()*AVATARS.length)];
+  const g=$('avatarGrid');g.innerHTML='';
+  AVATARS.forEach(a=>{const d=document.createElement('div');d.className='avatar-opt'+(a===selectedAvatar?' sel':'');
+    d.textContent=a;d.onclick=()=>{selectedAvatar=a;sfx.click();
+      g.querySelectorAll('.avatar-opt').forEach(x=>x.classList.toggle('sel',x===d));};
+    g.appendChild(d);});
+}
 $('manageBtn').onclick=()=>{pickPurpose='manage';sfx.click();openPickset()};
 
 //=================== PICKSET ===================
@@ -633,13 +676,14 @@ $('importFile').onchange=e=>{const f=e.target.files[0];if(!f)return;const r=new 
   r.readAsText(f);e.target.value='';};
 
 //=================== SOLO SETUP ===================
-let cfg={time:20,count:0,shuffle:0,players:[]};
+let cfg={time:20,count:0,shuffle:0,shuffleAns:0,players:[]};
 function openSetup(){
   cfg.players=(prefs.players&&prefs.players.length?prefs.players:[{name:'Hráč 1'}]).map(p=>({name:p.name}));
-  cfg.time=prefs.time??20;cfg.shuffle=prefs.shuffle??0;
+  cfg.time=prefs.time??20;cfg.shuffle=prefs.shuffle??0;cfg.shuffleAns=prefs.shuffleAns??0;
   renderPlayers();
   $('timeSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.t===cfg.time));
   $('shuffleSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.s===cfg.shuffle));
+  $('ansSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.a===cfg.shuffleAns));
   renderCountSeg($('countSeg'),v=>cfg.count=v,()=>cfg.count);
   show('setup');
 }
@@ -667,21 +711,31 @@ $('timeSeg').onclick=e=>{if(e.target.dataset.t===undefined)return;cfg.time=+e.ta
   $('timeSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===e.target));};
 $('shuffleSeg').onclick=e=>{if(e.target.dataset.s===undefined)return;cfg.shuffle=+e.target.dataset.s;sfx.click();
   $('shuffleSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===e.target));};
+$('ansSeg').onclick=e=>{if(e.target.dataset.a===undefined)return;cfg.shuffleAns=+e.target.dataset.a;sfx.click();
+  $('ansSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===e.target));};
 $('setupBack').onclick=()=>{sfx.click();openPickset()};
 $('startBtn').onclick=()=>{
   cfg.players=cfg.players.map((p,i)=>({name:p.name.trim()||('Hráč '+(i+1))}));
-  prefs.players=cfg.players.map(p=>({name:p.name}));prefs.time=cfg.time;prefs.shuffle=cfg.shuffle;savePrefs(prefs);
+  prefs.players=cfg.players.map(p=>({name:p.name}));prefs.time=cfg.time;prefs.shuffle=cfg.shuffle;prefs.shuffleAns=cfg.shuffleAns;savePrefs(prefs);
   startGame();};
 
 //=================== SOLO GAME ENGINE ===================
 let game=null;
-function buildQuestionList(shuffle,count){
+function shuffleOptions(q){
+  if(q.type==='tf')return q;
+  const idx=q.options.map((o,i)=>i).filter(i=>q.options[i]&&q.options[i].trim()!=='');
+  const perm=shuffleArr(idx);
+  return Object.assign({},q,{options:perm.map(i=>q.options[i]),correct:Math.max(0,perm.indexOf(q.correct))});
+}
+function buildQuestionList(shuffle,count,shuffleAns){
   let qs=sets[selectedSet].map(q=>q);
   if(shuffle)qs=shuffleArr(qs);
-  return qs.slice(0,count||qs.length);
+  qs=qs.slice(0,count||qs.length);
+  if(shuffleAns)qs=qs.map(shuffleOptions);
+  return qs;
 }
 function startGame(){
-  game={qs:buildQuestionList(cfg.shuffle,cfg.count),idx:0,
+  game={qs:buildQuestionList(cfg.shuffle,cfg.count,cfg.shuffleAns),idx:0,
     players:cfg.players.map((p,i)=>({name:p.name,color:PLAYER_COLORS[i%PLAYER_COLORS.length],score:0,correct:0,streak:0,best:0})),
     turn:0,multi:cfg.players.length>1,timer:null,timeLeft:0,startT:0,locked:false,lastGain:0,review:[]};
   show('quiz');renderQuestion();
@@ -704,9 +758,10 @@ function renderQuestion(){
     game.timer=setInterval(()=>{game.timeLeft--;$('timer').textContent=Math.max(0,game.timeLeft);
       if(game.timeLeft<=5&&game.timeLeft>0){$('timer').classList.add('low');sfx.tick();}
       if(game.timeLeft<=0)answer(-1,null);},1000);}
+  startMusic();
 }
 function answer(choice,el){
-  if(game.locked)return;game.locked=true;clearInterval(game.timer);$('timeBar').style.transition='none';
+  if(game.locked)return;game.locked=true;clearInterval(game.timer);stopMusic();$('timeBar').style.transition='none';
   const q=game.qs[game.idx],p=game.players[game.turn];const correct=choice===q.correct;
   const elapsed=(performance.now()-game.startT)/1000;
   document.querySelectorAll('#answers .answer').forEach((node,i)=>{node.onclick=null;
@@ -765,13 +820,13 @@ function showResults(){
 function podiumHTML(ranked){
   const order=[1,0,2],podium=ranked.slice(0,3),faces=['🥇','🥈','🥉'];let cols='';
   order.forEach(pos=>{if(!podium[pos])return;const p=podium[pos];const bar=pos===0?'b1':pos===1?'b2':'b3';
-    cols+=`<div class="col"><div class="face">${faces[pos]}</div><div class="pname">${escapeHtml(p.name)}</div>
+    cols+=`<div class="col"><div class="face">${faces[pos]}</div><div class="pname">${p.avatar?p.avatar+' ':''}${escapeHtml(p.name)}</div>
       <div class="bar ${bar}">${pos+1}.<div class="pts">${p.score} b.</div></div></div>`;});
   let rest='';
   if(ranked.length>3)rest='<div class="standings">'+ranked.slice(3).map((p,i)=>`<div class="stand-row">
-    <span class="rank">${i+4}.</span><span class="dot" style="background:${p.color||'#888'}"></span>
+    <span class="rank">${i+4}.</span><span class="av">${p.avatar||(p.color?'':'🎮')}</span>${p.color&&!p.avatar?`<span class="dot" style="background:${p.color}"></span>`:''}
     <span class="nm">${escapeHtml(p.name)}</span><span class="sc">${p.score}</span></div>`).join('')+'</div>';
-  return `<div class="center scoreline">Vítěz: <b style="color:${ranked[0].color||'var(--purple)'}">${escapeHtml(ranked[0].name)}</b> 🎉</div>
+  return `<div class="center scoreline">Vítěz: <b style="color:${ranked[0].color||'var(--purple)'}">${ranked[0].avatar?ranked[0].avatar+' ':''}${escapeHtml(ranked[0].name)}</b> 🎉</div>
     <div class="podium">${cols}</div>${rest}`;
 }
 function buildReview(){
@@ -807,10 +862,11 @@ function renderAnswerButtons(wrap,q,onPick){
 let host=null;
 function openLobby(){
   host={peer:null,pin:'',players:new Map(),qs:[],idx:0,phase:'lobby',timer:null,startT:0,
-    time:prefs.time&&prefs.time>0?prefs.time:20,count:0,shuffle:0,answers:{}};
+    time:prefs.time&&prefs.time>0?prefs.time:20,count:0,shuffle:0,shuffleAns:0,answers:{}};
   // settings UI
   $('hostTimeSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.t===host.time));
   $('hostShuffleSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.s===host.shuffle));
+  $('hostAnsSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.a===host.shuffleAns));
   renderCountSeg($('hostCountSeg'),v=>host.count=v,()=>host.count);
   $('pinDisplay').textContent='······';$('lobbyStatus').textContent='Spouštím spojení…';
   $('lobbyCount').textContent='0';$('hostStartBtn').disabled=true;
@@ -854,7 +910,8 @@ function handleHostData(conn,d){
     if(host.players.size>=12){mpSend(conn,{t:'rejected',reason:'Hra je plná'});return;}
     let name=(d.name||'Hráč').slice(0,16);
     const idx=host.players.size;
-    host.players.set(conn.peer,{conn,name,color:PLAYER_COLORS[idx%PLAYER_COLORS.length],score:0,streak:0,best:0,correct:0,alive:true});
+    const avatar=(d.avatar&&typeof d.avatar==='string')?d.avatar.slice(0,4):'🎮';
+    host.players.set(conn.peer,{conn,name,avatar,color:PLAYER_COLORS[idx%PLAYER_COLORS.length],score:0,streak:0,best:0,correct:0,alive:true});
     mpSend(conn,{t:'accepted',name,color:PLAYER_COLORS[idx%PLAYER_COLORS.length]});
     sfx.join();renderLobbyPlayers();updateStartBtn();
   } else if(d.t==='answer'){
@@ -881,7 +938,7 @@ function mpBroadcast(obj){host.players.forEach(p=>{if(p.alive)mpSend(p.conn,obj)
 function renderLobbyPlayers(){
   const wrap=$('lobbyPlayers');const arr=[...host.players.values()];
   $('lobbyCount').textContent=arr.length;
-  wrap.innerHTML=arr.length?arr.map(p=>`<span class="chip" style="border-left:6px solid ${p.color}">${escapeHtml(p.name)}</span>`).join('')
+  wrap.innerHTML=arr.length?arr.map(p=>`<span class="chip" style="border-left:6px solid ${p.color}"><span class="av">${p.avatar||'🎮'}</span>${escapeHtml(p.name)}</span>`).join('')
     :'<span class="muted" style="margin:0">Zatím nikdo. Sdílej PIN se spoluhráči…</span>';
 }
 function updateStartBtn(){const n=host.players.size;
@@ -891,6 +948,8 @@ $('hostTimeSeg').onclick=e=>{if(e.target.dataset.t===undefined)return;host.time=
   $('hostTimeSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===e.target));};
 $('hostShuffleSeg').onclick=e=>{if(e.target.dataset.s===undefined)return;host.shuffle=+e.target.dataset.s;sfx.click();
   $('hostShuffleSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===e.target));};
+$('hostAnsSeg').onclick=e=>{if(e.target.dataset.a===undefined)return;host.shuffleAns=+e.target.dataset.a;sfx.click();
+  $('hostAnsSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===e.target));};
 $('lobbyBack').onclick=()=>{closeHost();show('home')};
 $('copyPinBtn').onclick=()=>{const t=(host&&host.pin)||$('pinDisplay').textContent;
   copyToClipboard(t,'PIN zkopírován: '+t);};
@@ -909,7 +968,7 @@ function toggleFullscreen(){
 function closeHost(){if(host&&host.peer){try{host.peer.destroy()}catch(e){}}clearInterval(host&&host.timer);host=null;}
 $('hostStartBtn').onclick=()=>{
   if(host.players.size<1)return;sfx.click();
-  host.qs=buildQuestionList(host.shuffle,host.count);
+  host.qs=buildQuestionList(host.shuffle,host.count,host.shuffleAns);
   host.phase='playing';host.idx=0;
   mpBroadcast({t:'gameStart'});
   sendHostQuestion();
@@ -938,6 +997,7 @@ function startHostTimer(){
     const el=$('hostTimer');if(el)el.textContent=Math.max(0,host.timeLeft);
     if(host.timeLeft<=5&&host.timeLeft>0&&el)el.classList.add('low');
     if(host.timeLeft<=0)revealHost();},1000);
+  startMusic();
 }
 function renderHostQuestion(q){
   const opts=(q.type==='tf'?['Pravda','Lež']:q.options).map((o,i)=>o&&o.trim()).filter(Boolean);
@@ -954,8 +1014,10 @@ function renderHostQuestion(q){
       ${opts.map((o,i)=>`<div class="answer ${colorCls[i]}"><span class="sym">${tiles[i]}</span>
         <span>${escapeHtml(o)}</span><span class="cnt-badge" id="cnt${i}">0</span></div>`).join('')}
     </div>
-    <div class="center scoreline" id="hostAnsCount" style="margin-top:14px">Odpovědělo 0 / ${host.players.size}</div>`;
+    <div class="center scoreline" id="hostAnsCount" style="margin-top:14px">Odpovědělo 0 / ${host.players.size}</div>
+    <button class="btn-secondary" id="hostRevealNow" style="margin-top:12px">⏭ Vyhodnotit teď</button>`;
   const bar=$('hostTimeBar');if(bar){bar.style.transition='none';bar.style.width='100%';}
+  const rn=$('hostRevealNow');if(rn)rn.onclick=()=>{if(host.phase==='question'){sfx.click();revealHost();}};
   show('hostStage');
 }
 function updateHostLive(){
@@ -967,7 +1029,7 @@ function updateHostLive(){
 }
 function revealHost(){
   if(host.phase!=='question')return;
-  host.phase='reveal';clearInterval(host.timer);
+  host.phase='reveal';clearInterval(host.timer);stopMusic();
   const q=host.qs[host.idx];
   // capture ranks BEFORE adding this question's points
   [...host.players.entries()].sort((a,b)=>b[1].score-a[1].score).forEach(([id,p],i)=>p._prevRank=i+1);
@@ -1000,7 +1062,7 @@ function revealHost(){
   $('hostStage').insertAdjacentHTML('beforeend',`
     <div class="distchart">${bars}</div>
     <div class="standings" id="hostStand">${ranked.slice(0,5).map(([id,p],i)=>`<div class="stand-row">
-      <span class="rank">${i+1}.</span><span class="dot" style="background:${p.color}"></span>
+      <span class="rank">${i+1}.</span><span class="av">${p.avatar||'🎮'}</span>
       <span class="nm">${escapeHtml(p.name)} ${p._lastCorrect?'✅':''}</span><span class="sc">${p.score}</span></div>`).join('')}</div>
     <button class="btn-primary" id="hostNextBtn">${host.idx+1>=host.qs.length?'Zobrazit výsledky 🏆':'Další otázka →'}</button>`);
   requestAnimationFrame(()=>{document.querySelectorAll('#hostStage .dc-col').forEach(c=>c.style.height=c.dataset.h+'%');});
@@ -1011,7 +1073,7 @@ function revealHost(){
 function endHost(){
   host.phase='ended';
   const ranked=[...host.players.values()].sort((a,b)=>b.score-a.score);
-  const board=ranked.map((p,i)=>({name:p.name,score:p.score,rank:i+1}));
+  const board=ranked.map((p,i)=>({name:p.name,score:p.score,rank:i+1,avatar:p.avatar||'🎮'}));
   host.players.forEach(p=>{const myRank=board.findIndex(b=>b.name===p.name)+1;
     mpSend(p.conn,{t:'end',leaderboard:board.slice(0,5),yourRank:myRank,yourScore:p.score,total:board.length});});
   launchConfetti();sfx.win();
@@ -1021,7 +1083,7 @@ function endHost(){
       <button class="btn-secondary" id="hostHome">🏠 Ukončit</button></div>`;
   $('hostAgain').onclick=()=>{sfx.click();
     host.players.forEach(p=>{p.score=0;p.streak=0;p.best=0;p.correct=0;});
-    host.phase='playing';host.idx=0;host.qs=buildQuestionList(host.shuffle,host.count);
+    host.phase='playing';host.idx=0;host.qs=buildQuestionList(host.shuffle,host.count,host.shuffleAns);
     mpBroadcast({t:'gameStart'});sendHostQuestion();};
   $('hostHome').onclick=()=>{closeHost();show('home');};
 }
@@ -1035,16 +1097,17 @@ $('joinGoBtn').onclick=()=>{
   const pin=$('joinPin').value.replace(/\D/g,'');const name=$('joinName').value.trim();
   if(pin.length!==6){toast('Zadej 6místný PIN');return;}
   if(!name){toast('Zadej přezdívku');return;}
-  joinGame(pin,name);
+  joinGame(pin,name,selectedAvatar||AVATARS[0]);
 };
-function joinGame(pin,name){
+function joinGame(pin,name,avatar){
   $('joinStatus').textContent='Připojuji se…';
   closePlayer();
-  player={peer:null,conn:null,name,pin,connected:false,answered:false,qStart:0,curTime:20};
+  player={peer:null,conn:null,name,avatar,pin,connected:false,answered:false,qStart:0,curTime:20};
+  prefs.avatar=avatar;savePrefs(prefs);
   const peer=new Peer({debug:1});player.peer=peer;
   peer.on('open',()=>{
     const conn=peer.connect('kvizmania-'+pin,{reliable:true});player.conn=conn;
-    conn.on('open',()=>{mpSend(conn,{t:'join',name});});
+    conn.on('open',()=>{mpSend(conn,{t:'join',name,avatar});});
     conn.on('data',d=>handlePlayerData(d));
     conn.on('close',()=>{if(player&&player.connected)showPlayerMsg('🔌','Spojení s hostitelem skončilo.');});
   });
@@ -1068,8 +1131,8 @@ function handlePlayerData(d){
   else if(d.t==='hostLeft'){showPlayerMsg('🛑','Hostitel ukončil hru.');closePlayer();}
 }
 function showPlayerWait(title,sub){
-  $('playStage').innerHTML=`<div class="you-name">${escapeHtml(player.name)}</div>
-    <div class="wait-big"><div class="ico">⏳</div><div class="t">${title}</div>
+  $('playStage').innerHTML=`<div class="you-name">${player.avatar||''} ${escapeHtml(player.name)}</div>
+    <div class="wait-big"><div class="ico">${player.avatar||'⏳'}</div><div class="t">${title}</div>
     <p class="scoreline" style="margin-top:8px">${sub}</p></div>`;
   show('playStage');
 }
@@ -1080,7 +1143,7 @@ function showPlayerMsg(ico,msg){
 }
 function showPlayerQuestion(d){
   player.answered=false;player.curTime=d.time;player.phase='count';
-  const head=`<div class="you-name">${escapeHtml(player.name)} <span style="color:#999;font-weight:600">• otázka ${d.n}/${d.total}</span></div>`;
+  const head=`<div class="you-name">${player.avatar||''} ${escapeHtml(player.name)} <span style="color:#999;font-weight:600">• otázka ${d.n}/${d.total}</span></div>`;
   const qhtml=`<div class="question-text" style="min-height:auto;padding:10px 4px;font-size:1.15rem">${escapeHtml(d.qtext)}</div>`;
   const img=d.image?`<div class="q-image"><img src="${escapeAttr(d.image)}" onerror="this.parentNode.style.display='none'"></div>`:'';
   $('playStage').innerHTML=head+qhtml+img+`<div class="center scoreline">Připrav se… 🚀</div>`;
@@ -1103,7 +1166,7 @@ function playerAnswer(i,btn){
   mpSend(player.conn,{t:'answer',idx:i,dt});
   document.querySelectorAll('#pAnswers .answer').forEach(n=>{n.onclick=null;if(n!==btn)n.classList.add('dim');});
   sfx.click();
-  setTimeout(()=>{$('playStage').innerHTML=`<div class="you-name">${escapeHtml(player.name)}</div>
+  setTimeout(()=>{$('playStage').innerHTML=`<div class="you-name">${player.avatar||''} ${escapeHtml(player.name)}</div>
     <div class="wait-big"><div class="ico">✅</div><div class="t">Odpověď odeslána!</div>
     <p class="scoreline" style="margin-top:8px">Čekej na ostatní…</p></div>`;},500);
 }
@@ -1129,7 +1192,7 @@ function showPlayerEnd(d){
     <div class="wait-big" style="padding:14px"><div class="ico">${medal}</div>
     <div class="t">${d.yourRank}. místo</div><div class="big-num">${d.yourScore} b.</div></div>
     <div class="standings">${d.leaderboard.map((b,i)=>`<div class="stand-row">
-      <span class="rank">${i+1}.</span><span class="nm">${escapeHtml(b.name)}${b.name===player.name?' (ty)':''}</span>
+      <span class="rank">${i+1}.</span><span class="av">${b.avatar||'🎮'}</span><span class="nm">${escapeHtml(b.name)}${b.name===player.name?' (ty)':''}</span>
       <span class="sc">${b.score}</span></div>`).join('')}</div>
     <button class="btn-primary" style="margin-top:8px" onclick="location.reload()">🏠 Zpět na začátek</button>`;
   show('playStage');
@@ -1216,10 +1279,14 @@ function checkHashJoin(){
   const h=(location.hash||'').replace('#','').replace('join=','').trim();
   if(/^\d{6}$/.test(h)&&window.Peer){
     $('joinStatus').textContent='';$('joinPin').value=h;$('joinName').value=prefs.nick||'';
-    show('join');setTimeout(()=>$('joinName').focus(),150);
+    renderAvatarGrid();show('join');setTimeout(()=>$('joinName').focus(),150);
   }
 }
-applyTheme();show('home');checkHashJoin();
+function refreshToggleLabels(){
+  $('soundToggle').textContent=prefs.sound?'🔊 Zvuk':'🔇 Zvuk';
+  $('musicToggle').textContent=prefs.music?'🎵 Hudba':'🔇 Hudba';
+}
+applyTheme();refreshToggleLabels();show('home');checkHashJoin();
 addEventListener('resize',()=>{const cv=$('confetti');if(cv){cv.width=innerWidth;cv.height=innerHeight;}});
 window.addEventListener('beforeunload',()=>{closeHost();closePlayer&&closePlayer();});
 if(!window.Peer){$('netHint').textContent='ℹ️ Online režim vyžaduje internet — knihovna PeerJS se nenačetla. Offline režim „Na jednom zařízení" funguje.';}
