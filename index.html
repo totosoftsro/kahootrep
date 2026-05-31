@@ -243,6 +243,36 @@
   body.dark .scoreline{color:#c7bcdd}
   body.dark .topbar .icon-btn{background:#3a2b54;color:#ece6f5}
   body.dark .chip{background:#3a2b54;color:#d9c8ff}
+  body.dark .review-row{background:#2a1b40}
+  body.dark .review-row .rq{color:#ece6f5}
+  body.dark .review-opt.ok{color:#6ee06e}
+  body.dark .review-opt.bad{color:#ff8a9c}
+  body.dark .lobby-tools button{background:#3a2b54;color:#ece6f5}
+
+  /* universal quit button */
+  .quit-btn{position:fixed;top:14px;right:14px;z-index:46;background:rgba(0,0,0,.4);color:#fff;
+    width:46px;height:46px;border-radius:50%;font-size:1.15rem;font-weight:800;
+    display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px);box-shadow:0 4px 14px rgba(0,0,0,.3)}
+  .quit-btn:hover{background:var(--bad);filter:none}
+
+  /* question image */
+  .q-image{text-align:center;margin:2px 0 12px;line-height:0}
+  .q-image img{max-height:200px;max-width:100%;border-radius:14px;object-fit:contain;box-shadow:0 4px 14px rgba(0,0,0,.15)}
+  .qimg-prev{max-height:88px;border-radius:8px;margin:2px 0 8px;display:block}
+  .qimg-prev.hidden{display:none}
+
+  /* answer review (solo) */
+  .review-box{margin-top:16px;text-align:left;max-height:420px;overflow:auto}
+  .review-row{background:#f6f6fb;border-radius:12px;padding:12px 14px;margin-bottom:10px}
+  .review-row .rq{font-weight:700;margin-bottom:8px;color:#333}
+  .review-opt{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:8px;font-size:.92rem;margin-bottom:3px}
+  .review-opt.ok{background:rgba(38,137,12,.14);color:#1c6b08;font-weight:700}
+  .review-opt.bad{background:rgba(226,27,60,.12);color:#b3122c;font-weight:700}
+  .review-opt .ic{width:20px;text-align:center;flex:none}
+
+  /* lobby tools */
+  .lobby-tools{display:flex;gap:10px;flex-wrap:wrap;margin:-4px 0 4px}
+  .lobby-tools button{flex:1;min-width:130px;background:#eef0f5;color:#333;padding:11px;font-size:.9rem;box-shadow:none}
 
   @media(max-width:540px){
     .answers,.mode-grid{grid-template-columns:1fr}
@@ -327,6 +357,7 @@
     <div class="progress"><div id="progressBar"></div></div>
     <div class="timebar"><div id="timeBar"></div></div>
     <div class="question-text" id="questionText"></div>
+    <div class="q-image" id="qImage"></div>
     <div class="answers" id="answers"></div>
   </div>
 
@@ -380,6 +411,11 @@
       </div>
       <div class="qr-box hidden" id="qrBox"></div>
     </div>
+    <div class="lobby-tools">
+      <button id="copyPinBtn">📋 Kopírovat PIN</button>
+      <button id="copyLinkBtn">🔗 Kopírovat odkaz</button>
+      <button id="fsBtn">⛶ Celá obrazovka</button>
+    </div>
     <div class="conn-status" id="lobbyStatus">Spouštím spojení…</div>
     <h3>Připojení hráči (<span id="lobbyCount">0</span>)</h3>
     <div class="lobby-players" id="lobbyPlayers"><span class="muted" style="margin:0">Zatím nikdo. Sdílej PIN se spoluhráči…</span></div>
@@ -410,6 +446,7 @@
 </div>
 
 <div id="toast"></div>
+<button id="quitBtn" class="quit-btn hidden" title="Ukončit hru (Esc)">✕</button>
 <div id="cd" class="cd hidden"><div class="cd-num" id="cdNum">3</div></div>
 <canvas id="confetti" class="hidden"></canvas>
 
@@ -457,6 +494,8 @@ function loadSets(){const raw=localStorage.getItem(STORE_KEY);
 function saveSets(s){localStorage.setItem(STORE_KEY,JSON.stringify(s))}
 function loadPrefs(){try{return JSON.parse(localStorage.getItem(PREF_KEY))||{}}catch(e){return{}}}
 function savePrefs(p){localStorage.setItem(PREF_KEY,JSON.stringify(p))}
+function loadBest(){try{return JSON.parse(localStorage.getItem('kvizmania_best'))||{}}catch(e){return{}}}
+function saveBest(b){localStorage.setItem('kvizmania_best',JSON.stringify(b))}
 
 let sets=loadSets();
 let prefs=Object.assign({sound:true,theme:'light',time:20,shuffle:0,players:[{name:'Hráč 1'}]},loadPrefs());
@@ -465,8 +504,24 @@ function applyTheme(){document.body.classList.toggle('dark',prefs.theme==='dark'
 
 //=================== SCREENS ===================
 const SCREENS=['home','pickset','setup','quiz','feedback','results','editor','lobby','hostStage','join','playStage'];
-function show(id){SCREENS.forEach(s=>document.getElementById(s).classList.toggle('hidden',s!==id))}
+function show(id){SCREENS.forEach(s=>document.getElementById(s).classList.toggle('hidden',s!==id));
+  const q=document.getElementById('quitBtn');
+  if(q)q.classList.toggle('hidden',!['quiz','feedback','hostStage','playStage'].includes(id));}
 const $=id=>document.getElementById(id);
+function quitToHome(){
+  const onHost=!$('hostStage').classList.contains('hidden');
+  const onPlayer=!$('playStage').classList.contains('hidden');
+  const onSolo=!$('quiz').classList.contains('hidden')||!$('feedback').classList.contains('hidden');
+  if(onHost){
+    if(!confirm('Ukončit hru pro všechny hráče?'))return;
+    if(host){try{mpBroadcast({t:'hostLeft'})}catch(e){}closeHost();}
+  }else if(onPlayer){
+    if(!confirm('Opravdu odejít ze hry?'))return;closePlayer();
+  }else if(onSolo){
+    if(!confirm('Opravdu ukončit hru?'))return;if(game)clearInterval(game.timer);
+  }
+  sfx.click();show('home');
+}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2400)}
 
 //=================== SOUND ===================
@@ -548,11 +603,13 @@ function renderSetGrid(){
   const names=Object.keys(sets);
   if(selectedSet&&!sets[selectedSet])selectedSet=null;
   if(!selectedSet&&names.length)selectedSet=names[0];
+  const best=loadBest();
   names.forEach(name=>{
     const c=document.createElement('div');
     c.className='set-card'+(name===selectedSet?' sel':'');
+    const rec=best[name]?`<div class="cnt">🏅 rekord ${best[name]} b.</div>`:'';
     c.innerHTML=`<span class="edit-link" data-edit="1">✏️ upravit</span>
-      <h4>${escapeHtml(name)}</h4><div class="cnt">${sets[name].length} otázek</div>`;
+      <h4>${escapeHtml(name)}</h4><div class="cnt">${sets[name].length} otázek</div>${rec}`;
     c.onclick=e=>{if(e.target.dataset.edit){openEditor(name);return;}selectedSet=name;sfx.click();renderSetGrid();};
     grid.appendChild(c);
   });
@@ -626,7 +683,7 @@ function buildQuestionList(shuffle,count){
 function startGame(){
   game={qs:buildQuestionList(cfg.shuffle,cfg.count),idx:0,
     players:cfg.players.map((p,i)=>({name:p.name,color:PLAYER_COLORS[i%PLAYER_COLORS.length],score:0,correct:0,streak:0,best:0})),
-    turn:0,multi:cfg.players.length>1,timer:null,timeLeft:0,startT:0,locked:false,lastGain:0};
+    turn:0,multi:cfg.players.length>1,timer:null,timeLeft:0,startT:0,locked:false,lastGain:0,review:[]};
   show('quiz');renderQuestion();
 }
 function renderQuestion(){
@@ -635,6 +692,8 @@ function renderQuestion(){
   $('whoTurn').textContent=game.multi?`🎮 ${game.players[game.turn].name}`:'';
   $('whoTurn').style.color=game.multi?game.players[game.turn].color:'';
   $('questionText').textContent=q.q;
+  $('qImage').innerHTML=q.image?`<img src="${escapeAttr(q.image)}" alt="" onerror="this.parentNode.style.display='none'">`:'';
+  $('qImage').style.display=q.image?'':'none';
   $('progressBar').style.width=(game.idx/game.qs.length*100)+'%';
   renderAnswerButtons($('answers'),q,(i,btn)=>answer(i,btn));
   const T=cfg.time;$('timer').classList.remove('low');
@@ -657,6 +716,7 @@ function answer(choice,el){
   if(correct){p.correct++;p.streak++;p.best=Math.max(p.best,p.streak);gain=calcGain(elapsed,cfg.time,p.streak);p.score+=gain;sfx.correct();}
   else{p.streak=0;sfx.wrong();}
   game.lastGain=gain;
+  if(!game.multi)game.review.push({qtext:q.q,options:q.options.slice(),type:q.type,correct:q.correct,chosen:choice});
   setTimeout(()=>showFeedback(correct,choice,q,p,gain),850);
 }
 function showFeedback(correct,choice,q,p,gain){
@@ -686,10 +746,19 @@ function showResults(){
   show('results');sfx.win();const body=$('resultBody');
   if(!game.multi){const p=game.players[0],total=game.qs.length,pct=Math.round(p.correct/total*100);
     if(pct>=50)launchConfetti();
+    const best=loadBest();const prev=best[selectedSet]||0;const rec=p.score>prev;
+    if(rec){best[selectedSet]=p.score;saveBest(best);}
     body.innerHTML=`<div class="final-solo"><div class="ring" style="--p:${pct}"><span>${pct}%</span></div>
       <div class="big">${p.score} b.</div><p class="scoreline">Správně ${p.correct} z ${total} otázek</p>
       ${p.best>=3?`<div class="streak" style="margin-top:10px">🔥 Nejlepší série: ${p.best}×</div>`:''}
-      <p class="muted">${pct>=80?'Skvělý výkon! 🌟':pct>=50?'Dobrá práce! 👍':'Příště to půjde líp 💪'}</p></div>`;return;}
+      <div class="scoreline" style="margin-top:8px">${rec?'🏅 <b>Nový osobní rekord!</b>':'🏅 Osobní rekord: <b>'+Math.max(prev,p.score)+' b.</b>'}</div>
+      <p class="muted">${pct>=80?'Skvělý výkon! 🌟':pct>=50?'Dobrá práce! 👍':'Příště to půjde líp 💪'}</p>
+      <button class="btn-secondary" id="reviewBtn" style="margin-top:14px">📋 Přehled odpovědí</button>
+      <div class="review-box hidden" id="reviewBox"></div></div>`;
+    $('reviewBtn').onclick=()=>{const box=$('reviewBox');
+      if(box.classList.contains('hidden')){box.innerHTML=buildReview();box.classList.remove('hidden');$('reviewBtn').textContent='🙈 Skrýt přehled';}
+      else{box.classList.add('hidden');$('reviewBtn').textContent='📋 Přehled odpovědí';}};
+    return;}
   launchConfetti();
   body.innerHTML=podiumHTML([...game.players].sort((a,b)=>b.score-a.score));
 }
@@ -704,6 +773,19 @@ function podiumHTML(ranked){
     <span class="nm">${escapeHtml(p.name)}</span><span class="sc">${p.score}</span></div>`).join('')+'</div>';
   return `<div class="center scoreline">Vítěz: <b style="color:${ranked[0].color||'var(--purple)'}">${escapeHtml(ranked[0].name)}</b> 🎉</div>
     <div class="podium">${cols}</div>${rest}`;
+}
+function buildReview(){
+  return game.review.map((r,i)=>{
+    const opts=(r.type==='tf'?['Pravda','Lež']:r.options).filter(o=>o&&o.trim());
+    const rows=opts.map((o,oi)=>{
+      const isCorrect=oi===r.correct,isChosen=oi===r.chosen;
+      let cls='',ic='';
+      if(isCorrect){cls='ok';ic='✓';}else if(isChosen){cls='bad';ic='✗';}
+      return `<div class="review-opt ${cls}"><span class="ic">${ic}</span>${escapeHtml(o)}</div>`;
+    }).join('');
+    const mark=r.chosen===r.correct?'✅':(r.chosen===-1?'⏰':'❌');
+    return `<div class="review-row"><div class="rq">${mark} ${i+1}. ${escapeHtml(r.qtext)}</div>${rows}</div>`;
+  }).join('');
 }
 $('againBtn').onclick=()=>{sfx.click();startGame()};
 $('resHomeBtn').onclick=()=>{sfx.click();show('home')};
@@ -810,6 +892,20 @@ $('hostTimeSeg').onclick=e=>{if(e.target.dataset.t===undefined)return;host.time=
 $('hostShuffleSeg').onclick=e=>{if(e.target.dataset.s===undefined)return;host.shuffle=+e.target.dataset.s;sfx.click();
   $('hostShuffleSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===e.target));};
 $('lobbyBack').onclick=()=>{closeHost();show('home')};
+$('copyPinBtn').onclick=()=>{const t=(host&&host.pin)||$('pinDisplay').textContent;
+  copyToClipboard(t,'PIN zkopírován: '+t);};
+$('copyLinkBtn').onclick=()=>{const pin=(host&&host.pin)||$('pinDisplay').textContent;
+  const url=location.href.split('#')[0]+'#'+pin;copyToClipboard(url,'Odkaz zkopírován');};
+$('fsBtn').onclick=()=>{toggleFullscreen();};
+function copyToClipboard(text,okMsg){
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(()=>toast(okMsg),()=>toast('Kopírování selhalo'));}
+  else{try{const ta=document.createElement('textarea');ta.value=text;document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();toast(okMsg);}catch(e){toast('Zkopíruj ručně: '+text);}}
+}
+function toggleFullscreen(){
+  const d=document;
+  if(!d.fullscreenElement){(d.documentElement.requestFullscreen||d.documentElement.webkitRequestFullscreen||function(){}).call(d.documentElement);}
+  else{(d.exitFullscreen||d.webkitExitFullscreen||function(){}).call(d);}
+}
 function closeHost(){if(host&&host.peer){try{host.peer.destroy()}catch(e){}}clearInterval(host&&host.timer);host=null;}
 $('hostStartBtn').onclick=()=>{
   if(host.players.size<1)return;sfx.click();
@@ -824,7 +920,7 @@ function sendHostQuestion(){
   host.phase='countdown';host.answers={};
   const q=host.qs[host.idx];
   host.players.forEach(p=>mpSend(p.conn,{t:'question',n:host.idx+1,total:host.qs.length,
-    qtext:q.q,options:q.options,type:q.type||'abcd',time:host.time}));
+    qtext:q.q,options:q.options,type:q.type||'abcd',image:q.image||'',time:host.time}));
   renderHostQuestion(q);
   countdown(()=>{
     if(!host||host.phase!=='countdown')return;
@@ -853,6 +949,7 @@ function renderHostQuestion(q){
       <div class="timer" id="hostTimer">${host.time}</div></div>
     <div class="timebar"><div id="hostTimeBar"></div></div>
     <div class="question-text">${escapeHtml(q.q)}</div>
+    ${q.image?`<div class="q-image"><img src="${escapeAttr(q.image)}" onerror="this.parentNode.style.display='none'"></div>`:''}
     <div class="answers ${q.type==='tf'?'tf':''}" id="hostAnswers">
       ${opts.map((o,i)=>`<div class="answer ${colorCls[i]}"><span class="sym">${tiles[i]}</span>
         <span>${escapeHtml(o)}</span><span class="cnt-badge" id="cnt${i}">0</span></div>`).join('')}
@@ -968,6 +1065,7 @@ function handlePlayerData(d){
   else if(d.t==='question'){showPlayerQuestion(d);}
   else if(d.t==='reveal'){showPlayerReveal(d);}
   else if(d.t==='end'){showPlayerEnd(d);}
+  else if(d.t==='hostLeft'){showPlayerMsg('🛑','Hostitel ukončil hru.');closePlayer();}
 }
 function showPlayerWait(title,sub){
   $('playStage').innerHTML=`<div class="you-name">${escapeHtml(player.name)}</div>
@@ -984,13 +1082,14 @@ function showPlayerQuestion(d){
   player.answered=false;player.curTime=d.time;player.phase='count';
   const head=`<div class="you-name">${escapeHtml(player.name)} <span style="color:#999;font-weight:600">• otázka ${d.n}/${d.total}</span></div>`;
   const qhtml=`<div class="question-text" style="min-height:auto;padding:10px 4px;font-size:1.15rem">${escapeHtml(d.qtext)}</div>`;
-  $('playStage').innerHTML=head+qhtml+`<div class="center scoreline">Připrav se… 🚀</div>`;
+  const img=d.image?`<div class="q-image"><img src="${escapeAttr(d.image)}" onerror="this.parentNode.style.display='none'"></div>`:'';
+  $('playStage').innerHTML=head+qhtml+img+`<div class="center scoreline">Připrav se… 🚀</div>`;
   show('playStage');
   countdown(()=>{
     if(!player||player.phase!=='count')return;
     player.phase='answering';
     const q={q:d.qtext,options:d.options,type:d.type,correct:-1};
-    $('playStage').innerHTML=head+`<div class="timebar"><div id="pTimeBar"></div></div>`+qhtml+
+    $('playStage').innerHTML=head+`<div class="timebar"><div id="pTimeBar"></div></div>`+qhtml+img+
       `<div class="answers ${d.type==='tf'?'tf':''}" id="pAnswers"></div>`;
     renderAnswerButtons($('pAnswers'),q,(i,btn)=>playerAnswer(i,btn));
     const bar=$('pTimeBar');bar.style.transition='none';bar.style.width='100%';
@@ -1057,10 +1156,14 @@ function renderQList(){
         <button data-type="tf" data-q="${qi}" class="${isTF?'on':''}">Pravda/Lež</button></span></h4>
         <button class="mini danger" data-del="${qi}">Smazat</button></div>
       <input type="text" value="${escapeAttr(q.q)}" placeholder="Text otázky" data-qtext="${qi}" class="qtext-input">
+      <input type="text" value="${escapeAttr(q.image||'')}" placeholder="🖼 URL obrázku (nepovinné)" data-qimg="${qi}" class="qimg-input">
+      <img class="qimg-prev ${q.image?'':'hidden'}" data-qimgprev="${qi}" src="${escapeAttr(q.image||'')}" onerror="this.classList.add('hidden')">
       <label style="margin-top:4px">${isTF?'Vyber správnou možnost:':'Vyber tečkou správnou odpověď:'}</label>${opts}`;
     wrap.appendChild(item);
   });
   wrap.querySelectorAll('.qtext-input').forEach(i=>i.oninput=e=>sets[editingSet][+e.target.dataset.qtext].q=e.target.value);
+  wrap.querySelectorAll('.qimg-input').forEach(i=>i.oninput=e=>{const qi=+e.target.dataset.qimg;sets[editingSet][qi].image=e.target.value;
+    const prev=wrap.querySelector('[data-qimgprev="'+qi+'"]');if(prev){if(e.target.value.trim()){prev.src=e.target.value;prev.classList.remove('hidden');}else prev.classList.add('hidden');}});
   wrap.querySelectorAll('.opt-input').forEach(i=>i.oninput=e=>sets[editingSet][+e.target.dataset.q].options[+e.target.dataset.opt]=e.target.value);
   wrap.querySelectorAll('.corr-radio').forEach(r=>r.onchange=e=>sets[editingSet][+e.target.dataset.q].correct=+e.target.dataset.opt);
   wrap.querySelectorAll('[data-del]').forEach(b=>b.onclick=e=>{sets[editingSet].splice(+e.target.dataset.del,1);renderQList()});
@@ -1076,6 +1179,7 @@ $('saveSetBtn').onclick=()=>{
   const clean=sets[editingSet].filter(q=>q.q.trim()!==''&&q.options.filter(o=>o.trim()!=='').length>=2)
     .map(q=>{const opts=q.options.map(o=>o.trim());let c=q.correct;if(!opts[c]||!opts[c].trim()){c=opts.findIndex(o=>o.trim()!=='');}
       const out={q:q.q.trim(),options:opts,correct:Math.max(0,c)};
+      if(q.image&&q.image.trim())out.image=q.image.trim();
       if(q.type==='tf'){out.type='tf';out.options=['Pravda','Lež'];out.correct=q.correct>1?0:q.correct;}return out;});
   if(clean.length!==sets[editingSet].length&&!confirm('Některé otázky jsou neúplné a budou vynechány. Pokračovat?'))return;
   if(newName!==editingSet){if(sets[newName]){toast('Sada s tímto názvem už existuje');return;}delete sets[editingSet];}
@@ -1096,7 +1200,9 @@ document.addEventListener('keydown',e=>{
   if(!$('feedback').classList.contains('hidden')&&(e.key==='Enter'||e.key===' ')){e.preventDefault();$('nextBtn').click();}
   if(!$('playStage').classList.contains('hidden')&&player&&!player.answered){
     const n=parseInt(e.key);const b=document.querySelectorAll('#pAnswers .answer');if(n>=1&&n<=4&&b[n-1])b[n-1].click();}
+  if(e.key==='Escape'&&!$('quitBtn').classList.contains('hidden'))quitToHome();
 });
+$('quitBtn').onclick=quitToHome;
 
 //=================== UTILS ===================
 function escapeHtml(s){return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
