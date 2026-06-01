@@ -477,6 +477,8 @@
     <div class="seg" id="hostCountSeg"></div>
     <div class="seg" id="hostShuffleSeg"><button data-s="0" class="on">Podle sady</button><button data-s="1">Náhodně</button></div>
     <div class="seg" id="hostAnsSeg"><button data-a="0" class="on">Odpovědi napevno</button><button data-a="1">Zamíchat odpovědi</button></div>
+    <div class="team-title" style="color:var(--purple)">Týmy</div>
+    <div class="seg" id="hostTeamSeg"><button data-tm="0" class="on">Bez týmů</button><button data-tm="2">2</button><button data-tm="3">3</button><button data-tm="4">4</button></div>
     <button class="btn-primary" id="hostStartBtn" disabled>▶ Spustit (potřebuješ ≥1 hráče)</button>
   </div>
 
@@ -514,6 +516,9 @@ const STORE_KEY='kvizmania_sets_v2', PREF_KEY='kvizmania_prefs_v1';
 const PLAYER_COLORS=['#e21b3c','#1368ce','#d89e00','#26890c','#9b2fae','#16a3a3','#e8590c','#2b3a67'];
 const SYMBOLS=['▲','◆','●','■'];
 const AVATARS=['🦊','🐼','🐲','🦄','🐙','🦁','🐸','🐵','🐯','🐰','🐨','🐷','🦉','🐝','🦖','🐳','🦋','🐢'];
+const TEAM_NAMES=['Červení','Modří','Zelení','Žlutí'];
+const TEAM_COLORS=['#e21b3c','#1368ce','#26890c','#d89e00'];
+function teamInfo(t){return (t==null||t<0)?null:{idx:t,name:TEAM_NAMES[t],color:TEAM_COLORS[t]};}
 
 const DEFAULT_SETS={
   "Všeobecný přehled":[
@@ -967,11 +972,12 @@ function renderAnswerButtons(wrap,q,onAnswer){
 let host=null;
 function openLobby(){
   host={peer:null,pin:'',players:new Map(),qs:[],idx:0,phase:'lobby',timer:null,startT:0,
-    time:prefs.time&&prefs.time>0?prefs.time:20,count:0,shuffle:0,shuffleAns:0,answers:{},stats:[]};
+    time:prefs.time&&prefs.time>0?prefs.time:20,count:0,shuffle:0,shuffleAns:0,teams:0,answers:{},stats:[]};
   // settings UI
   $('hostTimeSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.t===host.time));
   $('hostShuffleSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.s===host.shuffle));
   $('hostAnsSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.a===host.shuffleAns));
+  $('hostTeamSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.tm===host.teams));
   renderCountSeg($('hostCountSeg'),v=>host.count=v,()=>host.count);
   $('pinDisplay').textContent='······';$('lobbyStatus').textContent='Spouštím spojení…';
   $('lobbyCount').textContent='0';$('hostStartBtn').disabled=true;
@@ -1016,8 +1022,9 @@ function handleHostData(conn,d){
     let name=(d.name||'Hráč').slice(0,16);
     const idx=host.players.size;
     const avatar=(d.avatar&&typeof d.avatar==='string')?d.avatar.slice(0,4):'🎮';
-    host.players.set(conn.peer,{conn,name,avatar,color:PLAYER_COLORS[idx%PLAYER_COLORS.length],score:0,streak:0,best:0,correct:0,alive:true});
-    mpSend(conn,{t:'accepted',name,color:PLAYER_COLORS[idx%PLAYER_COLORS.length]});
+    const team=host.teams>0?(idx%host.teams):null;
+    host.players.set(conn.peer,{conn,name,avatar,team,color:PLAYER_COLORS[idx%PLAYER_COLORS.length],score:0,streak:0,best:0,correct:0,alive:true});
+    mpSend(conn,{t:'accepted',name,color:PLAYER_COLORS[idx%PLAYER_COLORS.length],team:teamInfo(team)});
     sfx.join();renderLobbyPlayers();updateStartBtn();
   } else if(d.t==='answer'){
     if(host.phase!=='question'&&host.phase!=='countdown')return;
@@ -1043,8 +1050,16 @@ function mpBroadcast(obj){host.players.forEach(p=>{if(p.alive)mpSend(p.conn,obj)
 function renderLobbyPlayers(){
   const wrap=$('lobbyPlayers');const arr=[...host.players.values()];
   $('lobbyCount').textContent=arr.length;
-  wrap.innerHTML=arr.length?arr.map(p=>`<span class="chip" style="border-left:6px solid ${p.color}"><span class="av">${p.avatar||'🎮'}</span>${escapeHtml(p.name)}</span>`).join('')
-    :'<span class="muted" style="margin:0">Zatím nikdo. Sdílej PIN se spoluhráči…</span>';
+  if(!arr.length){wrap.innerHTML='<span class="muted" style="margin:0">Zatím nikdo. Sdílej PIN se spoluhráči…</span>';return;}
+  if(host.teams>0){
+    let html='';
+    for(let t=0;t<host.teams;t++){const members=arr.filter(p=>p.team===t);
+      html+=`<div class="team-chip-grp"><div class="team-title"><span class="team-badge" style="background:${TEAM_COLORS[t]}">${TEAM_NAMES[t]}</span></div>`+
+        (members.length?members.map(p=>`<span class="chip"><span class="av">${p.avatar||'🎮'}</span>${escapeHtml(p.name)}</span>`).join(' '):'<span class="muted" style="margin:0">— zatím prázdné —</span>')+`</div>`;}
+    wrap.innerHTML=html;
+  }else{
+    wrap.innerHTML=arr.map(p=>`<span class="chip" style="border-left:6px solid ${p.color}"><span class="av">${p.avatar||'🎮'}</span>${escapeHtml(p.name)}</span>`).join('');
+  }
 }
 function updateStartBtn(){const n=host.players.size;
   $('hostStartBtn').disabled=n<1;
@@ -1055,6 +1070,13 @@ $('hostShuffleSeg').onclick=e=>{if(e.target.dataset.s===undefined)return;host.sh
   $('hostShuffleSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===e.target));};
 $('hostAnsSeg').onclick=e=>{if(e.target.dataset.a===undefined)return;host.shuffleAns=+e.target.dataset.a;sfx.click();
   $('hostAnsSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===e.target));};
+$('hostTeamSeg').onclick=e=>{if(e.target.dataset.tm===undefined)return;host.teams=+e.target.dataset.tm;sfx.click();
+  $('hostTeamSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===e.target));
+  reassignTeams();renderLobbyPlayers();};
+function reassignTeams(){let i=0;host.players.forEach(p=>{p.team=host.teams>0?(i%host.teams):null;
+  mpSend(p.conn,{t:'team',team:teamInfo(p.team)});i++;});}
+function teamTotals(){const tot={};host.players.forEach(p=>{if(p.team!=null){tot[p.team]=(tot[p.team]||0)+p.score;}});
+  return Object.keys(tot).map(t=>({idx:+t,name:TEAM_NAMES[+t],color:TEAM_COLORS[+t],score:tot[t]})).sort((a,b)=>b.score-a.score);}
 $('lobbyBack').onclick=()=>{closeHost();show('home')};
 $('copyPinBtn').onclick=()=>{const t=(host&&host.pin)||$('pinDisplay').textContent;
   copyToClipboard(t,'PIN zkopírován: '+t);};
@@ -1165,7 +1187,11 @@ function revealHost(){
   ranked.forEach(([id,p],i)=>{const delta=host.idx===0?0:(p._prevRank-(i+1));const a=host.answers[id];
     mpSend(p.conn,{t:'reveal',correct:p._lastCorrect,timedOut:!a,gained:p._lastGain,joker:p._lastJoker,
       score:p.score,rank:i+1,rankDelta:delta,total:ranked.length,correctAns:cAns});});
-  const standings=`<div class="standings" id="hostStand">${ranked.slice(0,5).map(([id,p],i)=>`<div class="stand-row">
+  const standings = host.teams>0
+    ? `<div class="team-title" style="text-align:center;margin-top:8px">Pořadí týmů</div><div class="standings">${teamTotals().map((tm,i)=>`<div class="stand-row">
+        <span class="rank">${i+1}.</span><span class="team-badge" style="background:${tm.color}">${tm.name}</span>
+        <span class="nm"></span><span class="sc">${tm.score}</span></div>`).join('')}</div>`
+    : `<div class="standings" id="hostStand">${ranked.slice(0,5).map(([id,p],i)=>`<div class="stand-row">
       <span class="rank">${i+1}.</span><span class="av">${p.avatar||'🎮'}</span>
       <span class="nm">${escapeHtml(p.name)} ${p._lastCorrect?'✅':''}${p._lastJoker?' ✨':''}</span><span class="sc">${p.score}</span></div>`).join('')}</div>`;
   const nextBtn=`<button class="btn-primary" id="hostNextBtn">${host.idx+1>=host.qs.length?'Zobrazit výsledky 🏆':'Další otázka →'}</button>`;
@@ -1196,10 +1222,16 @@ function endHost(){
   host.phase='ended';
   const ranked=[...host.players.values()].sort((a,b)=>b.score-a.score);
   const board=ranked.map((p,i)=>({name:p.name,score:p.score,rank:i+1,avatar:p.avatar||'🎮'}));
+  const teams=host.teams>0?teamTotals():null;
+  const teamBoard=teams?teams.map(t=>({name:t.name,color:t.color,score:t.score})):null;
   host.players.forEach(p=>{const myRank=board.findIndex(b=>b.name===p.name)+1;
-    mpSend(p.conn,{t:'end',leaderboard:board.slice(0,5),yourRank:myRank,yourScore:p.score,total:board.length});});
+    mpSend(p.conn,{t:'end',leaderboard:board.slice(0,5),yourRank:myRank,yourScore:p.score,total:board.length,
+      teamBoard,yourTeam:teamInfo(p.team)});});
   launchConfetti();sfx.win();
-  $('hostStage').innerHTML=`<h2 class="center">🏆 Konec hry</h2>${podiumHTML(ranked)}
+  const winBlock = teams
+    ? `<div class="center scoreline">Vítězný tým: <b style="color:${teams[0].color}">${teams[0].name}</b> 🎉</div>${podiumHTML(teams)}`
+    : podiumHTML(ranked);
+  $('hostStage').innerHTML=`<h2 class="center">🏆 Konec hry</h2>${winBlock}
     <button class="btn-secondary" id="hostStatsBtn" style="margin-top:14px">📊 Statistiky otázek</button>
     <div class="stats-box hidden" id="hostStatsBox"></div>
     <div class="btn-row" style="margin-top:14px">
@@ -1258,18 +1290,20 @@ function joinGame(pin,name,avatar){
 }
 function closePlayer(){if(player){clearTimeout(player._to);if(player.peer){try{player.peer.destroy()}catch(e){}}}player=null;}
 function handlePlayerData(d){
-  if(d.t==='accepted'){player.connected=true;clearTimeout(player._to);player.color=d.color;
+  if(d.t==='accepted'){player.connected=true;clearTimeout(player._to);player.color=d.color;player.team=d.team;
     prefs.nick=player.name;savePrefs(prefs);
     showPlayerWait('Jsi ve hře! 🎉','Počkej, až hostitel spustí hru…');show('playStage');}
   else if(d.t==='rejected'){$('joinStatus').textContent='❌ '+(d.reason||'Odmítnuto');closePlayer();}
-  else if(d.t==='gameStart'){player.jokerAvail=true;player.jokerActive=false;showPlayerWait('Připrav se… 🚀','První otázka přijde za okamžik');}
+  else if(d.t==='team'){player.team=d.team;if(player.phase!=='answering'&&player.phase!=='count'&&!player.gameRunning)showPlayerWait('Jsi ve hře! 🎉','Počkej, až hostitel spustí hru…');}
+  else if(d.t==='gameStart'){player.gameRunning=true;player.jokerAvail=true;player.jokerActive=false;showPlayerWait('Připrav se… 🚀','První otázka přijde za okamžik');}
   else if(d.t==='question'){showPlayerQuestion(d);}
   else if(d.t==='reveal'){showPlayerReveal(d);}
   else if(d.t==='end'){showPlayerEnd(d);}
   else if(d.t==='hostLeft'){showPlayerMsg('🛑','Hostitel ukončil hru.');closePlayer();}
 }
 function showPlayerWait(title,sub){
-  $('playStage').innerHTML=`<div class="you-name">${player.avatar||''} ${escapeHtml(player.name)}</div>
+  const tb=player.team?`<div style="text-align:center;margin-bottom:6px"><span class="team-badge" style="background:${player.team.color}">Tým ${player.team.name}</span></div>`:'';
+  $('playStage').innerHTML=`<div class="you-name">${player.avatar||''} ${escapeHtml(player.name)}</div>${tb}
     <div class="wait-big"><div class="ico">${player.avatar||'⏳'}</div><div class="t">${title}</div>
     <p class="scoreline" style="margin-top:8px">${sub}</p></div>`;
   show('playStage');
@@ -1331,9 +1365,18 @@ function showPlayerReveal(d){
 function showPlayerEnd(d){
   const medal=d.yourRank===1?'🥇':d.yourRank===2?'🥈':d.yourRank===3?'🥉':'🎮';
   if(d.yourRank<=3)launchConfetti();sfx.win();
+  let teamHtml='';
+  if(d.teamBoard&&d.teamBoard.length){
+    const myTeamRank=d.yourTeam?d.teamBoard.findIndex(t=>t.name===d.yourTeam.name)+1:0;
+    teamHtml=`<div class="team-title" style="text-align:center;margin-top:8px">Pořadí týmů${d.yourTeam?` — tvůj tým <b style="color:${d.yourTeam.color}">${d.yourTeam.name}</b> je ${myTeamRank}.`:''}</div>
+      <div class="standings">${d.teamBoard.map((t,i)=>`<div class="stand-row"><span class="rank">${i+1}.</span>
+        <span class="team-badge" style="background:${t.color}">${t.name}</span><span class="nm"></span><span class="sc">${t.score}</span></div>`).join('')}</div>`;
+  }
   $('playStage').innerHTML=`<h2 class="center">🏆 Konec hry</h2>
     <div class="wait-big" style="padding:14px"><div class="ico">${medal}</div>
     <div class="t">${d.yourRank}. místo</div><div class="big-num">${d.yourScore} b.</div></div>
+    ${teamHtml}
+    <div class="team-title" style="text-align:center">Nejlepší hráči</div>
     <div class="standings">${d.leaderboard.map((b,i)=>`<div class="stand-row">
       <span class="rank">${i+1}.</span><span class="av">${b.avatar||'🎮'}</span><span class="nm">${escapeHtml(b.name)}${b.name===player.name?' (ty)':''}</span>
       <span class="sc">${b.score}</span></div>`).join('')}</div>
