@@ -285,6 +285,44 @@
   body.dark .avatar-opt{background:#3a2b54}
   body.dark .avatar-opt.sel{background:#4a3669}
 
+  /* joker / power-up */
+  .joker-bar{display:flex;justify-content:center;margin:10px 0 0}
+  .joker-btn{background:linear-gradient(135deg,#ffd84d,#e0a800);color:#5a4500;padding:10px 18px;
+    border-radius:30px;font-weight:800;font-size:.92rem;box-shadow:0 4px 0 #b8860b}
+  .joker-btn:active{box-shadow:0 1px 0 #b8860b;transform:translateY(3px)}
+  .joker-btn.used{background:#e0e0e0;color:#999;box-shadow:0 4px 0 #bbb;cursor:default}
+  .joker-btn.active{animation:pulse .6s infinite}
+  .joker-tag{display:inline-block;background:#fff3d6;color:#b8860b;padding:4px 12px;border-radius:20px;font-weight:800;font-size:.9rem;margin-top:8px}
+
+  /* multi-select + submit */
+  .answer.picked{box-shadow:0 0 0 5px #fff,0 0 0 11px var(--purple);transform:scale(1.02)}
+  .submit-bar{margin-top:14px}
+  .text-answer{display:flex;gap:10px;margin-top:14px}
+  .text-answer input{margin-bottom:0;font-size:1.1rem}
+  .hint{font-size:.82rem;color:#888;text-align:center;margin-top:8px}
+
+  /* text answer rows in editor */
+  .ta-row{display:flex;gap:10px;align-items:center;margin-bottom:9px}
+  .ta-row input{margin-bottom:0}
+  .ta-row .ic{font-size:1.2rem;color:var(--green);flex:none}
+
+  /* teams */
+  .team-chip-grp{margin-bottom:12px}
+  .team-title{font-weight:800;margin-bottom:6px;font-size:.95rem}
+  .team-badge{display:inline-block;padding:3px 10px;border-radius:20px;color:#fff;font-weight:700;font-size:.82rem}
+
+  /* stats */
+  .stats-box{margin-top:16px;text-align:left}
+  .stat-row{background:#f6f6fb;border-radius:10px;padding:10px 12px;margin-bottom:8px}
+  .stat-row .sq{font-weight:700;font-size:.9rem;margin-bottom:6px;color:#333}
+  .stat-bar{height:10px;background:#e6e6ef;border-radius:5px;overflow:hidden}
+  .stat-bar>div{height:100%;background:linear-gradient(90deg,var(--green),#5fd33f);border-radius:5px}
+  .stat-row .sp{font-size:.82rem;color:#666;margin-top:4px}
+  body.dark .stat-row,body.dark .stat-bar{background:#2a1b40}
+  body.dark .stat-row .sq{color:#ece6f5}
+  body.dark .stat-row .sp{color:#b3a3cf}
+  body.dark .hint{color:#a99cc4}
+
   @media(max-width:540px){
     .answers,.mode-grid{grid-template-columns:1fr}
     .answer .num{display:none}
@@ -373,6 +411,7 @@
     <div class="question-text" id="questionText"></div>
     <div class="q-image" id="qImage"></div>
     <div class="answers" id="answers"></div>
+    <div class="joker-bar"><button class="joker-btn hidden" id="jokerBtn">✨ Žolík: 2× body</button></div>
   </div>
 
   <!-- ============ FEEDBACK (solo) ============ -->
@@ -607,6 +646,22 @@ function calcGain(elapsed,time,streak){
   if(streak>=2)g+=Math.min((streak-1)*100,400);
   return g;
 }
+//=================== ANSWER EVALUATION (shared) ===================
+function normalizeTxt(s){return String(s==null?'':s).normalize('NFD').replace(/[̀-ͯ]/g,'').toLowerCase().replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();}
+function qCorrects(q){ // array of correct option indices
+  if(q.type==='multi')return (q.corrects||[]).slice();
+  return [q.correct];
+}
+function isAnswerCorrect(q,payload){
+  if(q.type==='text'){return Array.isArray(q.answers)&&q.answers.some(a=>normalizeTxt(a)!==''&&normalizeTxt(a)===normalizeTxt(payload));}
+  if(q.type==='multi'){const sel=[...new Set(payload||[])].sort((a,b)=>a-b).join(',');const cor=(q.corrects||[]).slice().sort((a,b)=>a-b).join(',');return sel!==''&&sel===cor;}
+  return payload===q.correct;
+}
+function correctText(q){
+  if(q.type==='text')return (q.answers||[]).filter(a=>a&&a.trim()).join(' / ');
+  if(q.type==='multi')return (q.corrects||[]).map(i=>q.options[i]).filter(Boolean).join(', ');
+  return q.options[q.correct];
+}
 
 //=================== MENU ===================
 $('soundToggle').onclick=()=>{prefs.sound=!prefs.sound;savePrefs(prefs);if(!prefs.sound)stopMusic();else sfx.click();
@@ -736,8 +791,8 @@ function buildQuestionList(shuffle,count,shuffleAns){
 }
 function startGame(){
   game={qs:buildQuestionList(cfg.shuffle,cfg.count,cfg.shuffleAns),idx:0,
-    players:cfg.players.map((p,i)=>({name:p.name,color:PLAYER_COLORS[i%PLAYER_COLORS.length],score:0,correct:0,streak:0,best:0})),
-    turn:0,multi:cfg.players.length>1,timer:null,timeLeft:0,startT:0,locked:false,lastGain:0,review:[]};
+    players:cfg.players.map((p,i)=>({name:p.name,color:PLAYER_COLORS[i%PLAYER_COLORS.length],score:0,correct:0,streak:0,best:0,jokerAvail:true})),
+    turn:0,multi:cfg.players.length>1,timer:null,timeLeft:0,startT:0,locked:false,lastGain:0,lastJoker:false,jokerActive:false,review:[]};
   show('quiz');renderQuestion();
 }
 function renderQuestion(){
@@ -749,7 +804,11 @@ function renderQuestion(){
   $('qImage').innerHTML=q.image?`<img src="${escapeAttr(q.image)}" alt="" onerror="this.parentNode.style.display='none'">`:'';
   $('qImage').style.display=q.image?'':'none';
   $('progressBar').style.width=(game.idx/game.qs.length*100)+'%';
-  renderAnswerButtons($('answers'),q,(i,btn)=>answer(i,btn));
+  renderAnswerButtons($('answers'),q,payload=>answer(payload));
+  // joker button for current player
+  game.jokerActive=false;const cur=game.players[game.turn],jb=$('jokerBtn');
+  if(cur.jokerAvail){jb.classList.remove('hidden','active');jb.textContent='✨ Žolík: 2× body';}
+  else jb.classList.add('hidden');
   const T=cfg.time;$('timer').classList.remove('low');
   if(T===0){$('timer').textContent='∞';$('timeBar').style.width='100%';game.startT=performance.now();clearInterval(game.timer);}
   else{game.timeLeft=T;$('timer').textContent=T;$('timeBar').style.transition='none';$('timeBar').style.width='100%';
@@ -757,31 +816,44 @@ function renderQuestion(){
     requestAnimationFrame(()=>{$('timeBar').style.transition=`width ${T}s linear`;$('timeBar').style.width='0%';});
     game.timer=setInterval(()=>{game.timeLeft--;$('timer').textContent=Math.max(0,game.timeLeft);
       if(game.timeLeft<=5&&game.timeLeft>0){$('timer').classList.add('low');sfx.tick();}
-      if(game.timeLeft<=0)answer(-1,null);},1000);}
+      if(game.timeLeft<=0)answer('__TO__');},1000);}
   startMusic();
 }
-function answer(choice,el){
-  if(game.locked)return;game.locked=true;clearInterval(game.timer);stopMusic();$('timeBar').style.transition='none';
-  const q=game.qs[game.idx],p=game.players[game.turn];const correct=choice===q.correct;
-  const elapsed=(performance.now()-game.startT)/1000;
-  document.querySelectorAll('#answers .answer').forEach((node,i)=>{node.onclick=null;
-    if(i===q.correct)node.classList.add('correct');else node.classList.add('dim');});
-  if(el&&!correct)el.classList.add('wrong');
-  let gain=0;
-  if(correct){p.correct++;p.streak++;p.best=Math.max(p.best,p.streak);gain=calcGain(elapsed,cfg.time,p.streak);p.score+=gain;sfx.correct();}
-  else{p.streak=0;sfx.wrong();}
-  game.lastGain=gain;
-  if(!game.multi)game.review.push({qtext:q.q,options:q.options.slice(),type:q.type,correct:q.correct,chosen:choice});
-  setTimeout(()=>showFeedback(correct,choice,q,p,gain),850);
+$('jokerBtn').onclick=()=>{const cur=game.players[game.turn];if(!cur.jokerAvail||game.jokerActive)return;
+  game.jokerActive=true;cur.jokerAvail=false;sfx.click();
+  $('jokerBtn').classList.add('active');$('jokerBtn').textContent='✨ Žolík AKTIVNÍ (2×)';};
+function revealSoloAnswers(q,payload){
+  if(q.type==='text')return;
+  const correctSet=qCorrects(q);
+  const sel=q.type==='multi'?(Array.isArray(payload)?payload:[]):[payload];
+  document.querySelectorAll('#answers .answer').forEach(node=>{node.onclick=null;const i=+node.dataset.oi;
+    if(correctSet.includes(i))node.classList.add('correct');
+    else{node.classList.add('dim');if(sel.includes(i))node.classList.add('wrong');}});
+  const sb=document.querySelector('#answers .submit-bar');if(sb){sb.disabled=true;sb.style.opacity='.5';}
 }
-function showFeedback(correct,choice,q,p,gain){
-  $('fbEmoji').textContent=correct?['🎉','🔥','⭐','💪','🚀'][Math.floor(Math.random()*5)]:(choice===-1?'⏰':'😬');
-  $('fbTitle').textContent=correct?'Správně!':(choice===-1?'Čas vypršel!':'Špatně!');
+function answer(payload,el){
+  if(game.locked)return;game.locked=true;clearInterval(game.timer);stopMusic();$('timeBar').style.transition='none';
+  const q=game.qs[game.idx],p=game.players[game.turn];
+  const timedOut=payload==='__TO__';
+  const correct=!timedOut&&isAnswerCorrect(q,payload);
+  const elapsed=(performance.now()-game.startT)/1000;
+  revealSoloAnswers(q,payload);
+  const jokerOn=game.jokerActive;game.jokerActive=false;
+  let gain=0;
+  if(correct){p.correct++;p.streak++;p.best=Math.max(p.best,p.streak);gain=calcGain(elapsed,cfg.time,p.streak);if(jokerOn)gain*=2;p.score+=gain;sfx.correct();}
+  else{p.streak=0;sfx.wrong();}
+  game.lastGain=gain;game.lastJoker=correct&&jokerOn;
+  if(!game.multi)game.review.push({qtext:q.q,type:q.type||'abcd',options:(q.options||[]).slice(),corrects:qCorrects(q),correct:q.correct,answers:(q.answers||[]).slice(),chosen:payload,timedOut});
+  setTimeout(()=>showFeedback(correct,timedOut,q,p,gain),850);
+}
+function showFeedback(correct,timedOut,q,p,gain){
+  $('fbEmoji').textContent=correct?['🎉','🔥','⭐','💪','🚀'][Math.floor(Math.random()*5)]:(timedOut?'⏰':'😬');
+  $('fbTitle').textContent=correct?'Správně!':(timedOut?'Čas vypršel!':'Špatně!');
   $('fbTitle').style.color=correct?'var(--ok)':'var(--bad)';
   $('fbGain').textContent=correct?`+${gain} bodů`:'';
   $('fbScore').innerHTML=correct?(game.multi?`${escapeHtml(p.name)} má celkem <b>${p.score}</b> bodů`:`Celkem <b>${p.score}</b> bodů`)
-    :`Správná odpověď: <b>${escapeHtml(q.options[q.correct])}</b>`;
-  $('fbStreakWrap').innerHTML=(correct&&p.streak>=2)?`<div class="streak">🔥 Série ${p.streak}× v řadě!</div>`:'';
+    :`Správná odpověď: <b>${escapeHtml(correctText(q))}</b>`;
+  $('fbStreakWrap').innerHTML=`${game.lastJoker?'<div class="joker-tag">✨ ŽOLÍK 2×!</div> ':''}${(correct&&p.streak>=2)?`<div class="streak">🔥 Série ${p.streak}× v řadě!</div>`:''}`;
   renderStandings($('liveStandings'));
   const last=game.idx+1>=game.qs.length,lastTurn=game.turn+1>=game.players.length;
   $('nextBtn').textContent=(last&&lastTurn)?'Zobrazit výsledky 🏆':'Pokračovat →';
@@ -831,14 +903,24 @@ function podiumHTML(ranked){
 }
 function buildReview(){
   return game.review.map((r,i)=>{
+    if(r.type==='text'){
+      const ok=isAnswerCorrect({type:'text',answers:r.answers},r.chosen);
+      const yours=r.timedOut?'(nestihl jsi)':(r.chosen||'(prázdné)');
+      const rows=`<div class="review-opt ${ok?'ok':'bad'}"><span class="ic">${ok?'✓':'✗'}</span>Tvá odpověď: ${escapeHtml(yours)}</div>`+
+        (ok?'':`<div class="review-opt ok"><span class="ic">✓</span>Správně: ${escapeHtml((r.answers||[]).join(' / '))}</div>`);
+      const mark=ok?'✅':(r.timedOut?'⏰':'❌');
+      return `<div class="review-row"><div class="rq">${mark} ${i+1}. ${escapeHtml(r.qtext)}</div>${rows}</div>`;
+    }
+    const corrects=(r.corrects&&r.corrects.length?r.corrects:[r.correct]);
+    const sel=r.type==='multi'?(Array.isArray(r.chosen)?r.chosen:[]):[r.chosen];
     const opts=(r.type==='tf'?['Pravda','Lež']:r.options).filter(o=>o&&o.trim());
     const rows=opts.map((o,oi)=>{
-      const isCorrect=oi===r.correct,isChosen=oi===r.chosen;
-      let cls='',ic='';
-      if(isCorrect){cls='ok';ic='✓';}else if(isChosen){cls='bad';ic='✗';}
+      const isC=corrects.includes(oi),isS=sel.includes(oi);
+      let cls='',ic='';if(isC){cls='ok';ic='✓';}else if(isS){cls='bad';ic='✗';}
       return `<div class="review-opt ${cls}"><span class="ic">${ic}</span>${escapeHtml(o)}</div>`;
     }).join('');
-    const mark=r.chosen===r.correct?'✅':(r.chosen===-1?'⏰':'❌');
+    const ok=r.type==='multi'?(sel.length&&JSON.stringify(sel.slice().sort((a,b)=>a-b))===JSON.stringify(corrects.slice().sort((a,b)=>a-b))):(sel[0]===r.correct);
+    const mark=ok?'✅':(r.timedOut?'⏰':'❌');
     return `<div class="review-row"><div class="rq">${mark} ${i+1}. ${escapeHtml(r.qtext)}</div>${rows}</div>`;
   }).join('');
 }
@@ -846,14 +928,37 @@ $('againBtn').onclick=()=>{sfx.click();startGame()};
 $('resHomeBtn').onclick=()=>{sfx.click();show('home')};
 
 //=================== SHARED ANSWER RENDER ===================
-function renderAnswerButtons(wrap,q,onPick){
+function renderAnswerButtons(wrap,q,onAnswer){
   wrap.innerHTML='';wrap.classList.toggle('tf',q.type==='tf');
-  if(q.type==='tf'){const syms=['✓','✗'],cls=['tf-yes','tf-no'];
-    q.options.slice(0,2).forEach((opt,i)=>{const b=document.createElement('button');b.className='answer tf '+cls[i];
-      b.innerHTML=`<span class="sym">${syms[i]}</span><span>${escapeHtml(opt)}</span>`;b.onclick=()=>onPick(i,b);wrap.appendChild(b);});
-  }else{q.options.forEach((opt,i)=>{if(!opt||!opt.trim())return;const b=document.createElement('button');b.className='answer a'+i;
+  if(q.type==='text'){
+    const row=document.createElement('div');row.className='text-answer';
+    row.innerHTML=`<input type="text" id="textAns" placeholder="Napiš odpověď…" autocomplete="off">`;
+    const sb=document.createElement('button');sb.className='btn-primary submit-bar';sb.textContent='Odeslat odpověď';
+    wrap.appendChild(row);wrap.appendChild(sb);
+    const inp=row.querySelector('#textAns');
+    sb.onclick=()=>{if(sb.disabled)return;onAnswer(inp.value);};
+    inp.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();sb.click();}});
+    setTimeout(()=>{try{inp.focus()}catch(e){}},60);
+    return;
+  }
+  if(q.type==='multi'){
+    const sel=new Set();
+    q.options.forEach((opt,i)=>{if(!opt||!opt.trim())return;const b=document.createElement('button');b.className='answer a'+i;b.dataset.oi=i;
       b.innerHTML=`<span class="sym">${SYMBOLS[i]}</span><span>${escapeHtml(opt)}</span><span class="num">${i+1}</span>`;
-      b.onclick=()=>onPick(i,b);wrap.appendChild(b);});}
+      b.onclick=()=>{if(sel.has(i)){sel.delete(i);b.classList.remove('picked');}else{sel.add(i);b.classList.add('picked');}};
+      wrap.appendChild(b);});
+    const sb=document.createElement('button');sb.className='btn-primary submit-bar';sb.textContent='✔ Odeslat výběr';
+    sb.onclick=()=>{if(sb.disabled)return;onAnswer([...sel]);};
+    wrap.appendChild(sb);
+    const h=document.createElement('div');h.className='hint';h.textContent='Více správných — označ všechny a odešli';wrap.appendChild(h);
+    return;
+  }
+  if(q.type==='tf'){const syms=['✓','✗'],cls=['tf-yes','tf-no'];
+    q.options.slice(0,2).forEach((opt,i)=>{const b=document.createElement('button');b.className='answer tf '+cls[i];b.dataset.oi=i;
+      b.innerHTML=`<span class="sym">${syms[i]}</span><span>${escapeHtml(opt)}</span>`;b.onclick=()=>onAnswer(i);wrap.appendChild(b);});
+  }else{q.options.forEach((opt,i)=>{if(!opt||!opt.trim())return;const b=document.createElement('button');b.className='answer a'+i;b.dataset.oi=i;
+      b.innerHTML=`<span class="sym">${SYMBOLS[i]}</span><span>${escapeHtml(opt)}</span><span class="num">${i+1}</span>`;
+      b.onclick=()=>onAnswer(i);wrap.appendChild(b);});}
 }
 
 //======================================================================
@@ -862,7 +967,7 @@ function renderAnswerButtons(wrap,q,onPick){
 let host=null;
 function openLobby(){
   host={peer:null,pin:'',players:new Map(),qs:[],idx:0,phase:'lobby',timer:null,startT:0,
-    time:prefs.time&&prefs.time>0?prefs.time:20,count:0,shuffle:0,shuffleAns:0,answers:{}};
+    time:prefs.time&&prefs.time>0?prefs.time:20,count:0,shuffle:0,shuffleAns:0,answers:{},stats:[]};
   // settings UI
   $('hostTimeSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.t===host.time));
   $('hostShuffleSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on',+b.dataset.s===host.shuffle));
@@ -917,7 +1022,7 @@ function handleHostData(conn,d){
   } else if(d.t==='answer'){
     if(host.phase!=='question'&&host.phase!=='countdown')return;
     const p=host.players.get(conn.peer);if(!p||host.answers[conn.peer])return;
-    host.answers[conn.peer]={idx:d.idx,dt:d.dt};
+    host.answers[conn.peer]={payload:(d.payload!==undefined?d.payload:d.idx),dt:d.dt,joker:!!d.joker};
     updateHostLive();
     if(host.phase==='question'&&allAnswered())revealHost();
   }
@@ -969,7 +1074,7 @@ function closeHost(){if(host&&host.peer){try{host.peer.destroy()}catch(e){}}clea
 $('hostStartBtn').onclick=()=>{
   if(host.players.size<1)return;sfx.click();
   host.qs=buildQuestionList(host.shuffle,host.count,host.shuffleAns);
-  host.phase='playing';host.idx=0;
+  host.phase='playing';host.idx=0;host.stats=[];
   mpBroadcast({t:'gameStart'});
   sendHostQuestion();
 };
@@ -1000,9 +1105,19 @@ function startHostTimer(){
   startMusic();
 }
 function renderHostQuestion(q){
-  const opts=(q.type==='tf'?['Pravda','Lež']:q.options).map((o,i)=>o&&o.trim()).filter(Boolean);
-  const tiles=(q.type==='tf'?['✓','✗']:SYMBOLS);
-  const colorCls=(q.type==='tf'?['tf-yes','tf-no']:['a0','a1','a2','a3']);
+  let answersHtml;
+  if(q.type==='text'){
+    answersHtml=`<div class="center" style="padding:20px"><div style="font-size:2.6rem">✍️</div>
+      <p class="scoreline">Otevřená odpověď — hráči píší na svých zařízeních</p></div>`;
+  }else{
+    const src=(q.type==='tf'?['Pravda','Lež']:q.options);
+    const tiles=(q.type==='tf'?['✓','✗']:SYMBOLS);
+    const colorCls=(q.type==='tf'?['tf-yes','tf-no']:['a0','a1','a2','a3']);
+    answersHtml=`<div class="answers ${q.type==='tf'?'tf':''}" id="hostAnswers">
+      ${src.map((o,i)=>(!o||!o.trim())?'':`<div class="answer ${colorCls[i]}" data-oi="${i}"><span class="sym">${tiles[i]}</span>
+        <span>${escapeHtml(o)}</span><span class="cnt-badge" id="cnt${i}">0</span></div>`).join('')}
+    </div>${q.type==='multi'?'<div class="hint">Více správných odpovědí</div>':''}`;
+  }
   $('hostStage').innerHTML=`
     <div class="quiz-top"><span class="qcount">Otázka ${host.idx+1} / ${host.qs.length}</span>
       <span class="who">📡 PIN ${host.pin}</span>
@@ -1010,20 +1125,23 @@ function renderHostQuestion(q){
     <div class="timebar"><div id="hostTimeBar"></div></div>
     <div class="question-text">${escapeHtml(q.q)}</div>
     ${q.image?`<div class="q-image"><img src="${escapeAttr(q.image)}" onerror="this.parentNode.style.display='none'"></div>`:''}
-    <div class="answers ${q.type==='tf'?'tf':''}" id="hostAnswers">
-      ${opts.map((o,i)=>`<div class="answer ${colorCls[i]}"><span class="sym">${tiles[i]}</span>
-        <span>${escapeHtml(o)}</span><span class="cnt-badge" id="cnt${i}">0</span></div>`).join('')}
-    </div>
+    ${answersHtml}
     <div class="center scoreline" id="hostAnsCount" style="margin-top:14px">Odpovědělo 0 / ${host.players.size}</div>
     <button class="btn-secondary" id="hostRevealNow" style="margin-top:12px">⏭ Vyhodnotit teď</button>`;
   const bar=$('hostTimeBar');if(bar){bar.style.transition='none';bar.style.width='100%';}
   const rn=$('hostRevealNow');if(rn)rn.onclick=()=>{if(host.phase==='question'){sfx.click();revealHost();}};
   show('hostStage');
 }
+function countSelections(){
+  const counts=[0,0,0,0];Object.values(host.answers).forEach(a=>{const pl=a.payload;
+    if(Array.isArray(pl))pl.forEach(i=>{if(i>=0&&i<4)counts[i]++;});
+    else if(typeof pl==='number'&&pl>=0&&pl<4)counts[pl]++;});
+  return counts;
+}
 function updateHostLive(){
   if(host.phase!=='question')return;
-  const counts=[0,0,0,0];Object.values(host.answers).forEach(a=>{if(a.idx>=0&&a.idx<4)counts[a.idx]++;});
-  counts.forEach((c,i)=>{const el=$('cnt'+i);if(el)el.textContent=c;});
+  const q=host.qs[host.idx];
+  if(q.type!=='text'){const counts=countSelections();counts.forEach((c,i)=>{const el=$('cnt'+i);if(el)el.textContent=c;});}
   let alive=0;host.players.forEach(p=>{if(p.alive)alive++;});
   const el=$('hostAnsCount');if(el)el.textContent=`Odpovědělo ${Object.keys(host.answers).length} / ${alive}`;
 }
@@ -1031,40 +1149,44 @@ function revealHost(){
   if(host.phase!=='question')return;
   host.phase='reveal';clearInterval(host.timer);stopMusic();
   const q=host.qs[host.idx];
-  // capture ranks BEFORE adding this question's points
   [...host.players.entries()].sort((a,b)=>b[1].score-a[1].score).forEach(([id,p],i)=>p._prevRank=i+1);
-  // score
+  let correctCount=0,answeredCount=0;
   host.players.forEach((p,id)=>{
     const a=host.answers[id];let gained=0,correct=false;
-    if(a&&a.idx===q.correct){correct=true;p.correct++;p.streak++;p.best=Math.max(p.best,p.streak);
-      gained=calcGain(a.dt/1000,host.time,p.streak);p.score+=gained;}
+    if(a){answeredCount++;correct=isAnswerCorrect(q,a.payload);}
+    if(correct){correctCount++;p.correct++;p.streak++;p.best=Math.max(p.best,p.streak);
+      gained=calcGain(a.dt/1000,host.time,p.streak);if(a.joker)gained*=2;p.score+=gained;}
     else p.streak=0;
-    p._lastGain=gained;p._lastCorrect=correct;
+    p._lastGain=gained;p._lastCorrect=correct;p._lastJoker=!!(a&&a.joker&&correct);
   });
+  host.stats.push({qtext:q.q,correct:correctCount,total:host.players.size});
   const ranked=[...host.players.entries()].sort((a,b)=>b[1].score-a[1].score);
-  ranked.forEach(([id,p],i)=>{const delta=host.idx===0?0:(p._prevRank-(i+1));
-    mpSend(p.conn,{t:'reveal',correct:q.correct,yourIdx:host.answers[id]?host.answers[id].idx:-1,
-      gained:p._lastGain,score:p.score,rank:i+1,rankDelta:delta,total:ranked.length,correctAns:q.options[q.correct]});});
-  // host UI: highlight tiles
-  document.querySelectorAll('#hostAnswers .answer').forEach((node,i)=>{
-    if(i===q.correct)node.classList.add('correct');else node.classList.add('dim');});
-  // distribution bar chart
-  const optCount=(q.type==='tf'?2:q.options.filter(o=>o&&o.trim()).length);
-  const counts=[0,0,0,0];Object.values(host.answers).forEach(a=>{if(a.idx>=0&&a.idx<4)counts[a.idx]++;});
-  const maxC=Math.max(1,counts[0],counts[1],counts[2],counts[3]);
-  const colors=(q.type==='tf'?['#26890c','#e21b3c']:['#e21b3c','#1368ce','#d89e00','#26890c']);
-  const syms=(q.type==='tf'?['✓','✗']:SYMBOLS);
-  let bars='';
-  for(let i=0;i<optCount;i++){bars+=`<div class="distbar ${i===q.correct?'':'faded'}">
-    <div class="dc-cnt">${counts[i]}${i===q.correct?' ✓':''}</div>
-    <div class="dc-col" data-h="${Math.round(counts[i]/maxC*100)}" style="height:0%;background:${colors[i]}"></div>
-    <div class="dc-sym" style="color:${colors[i]}">${syms[i]}</div></div>`;}
-  $('hostStage').insertAdjacentHTML('beforeend',`
-    <div class="distchart">${bars}</div>
-    <div class="standings" id="hostStand">${ranked.slice(0,5).map(([id,p],i)=>`<div class="stand-row">
+  const cAns=correctText(q);
+  ranked.forEach(([id,p],i)=>{const delta=host.idx===0?0:(p._prevRank-(i+1));const a=host.answers[id];
+    mpSend(p.conn,{t:'reveal',correct:p._lastCorrect,timedOut:!a,gained:p._lastGain,joker:p._lastJoker,
+      score:p.score,rank:i+1,rankDelta:delta,total:ranked.length,correctAns:cAns});});
+  const standings=`<div class="standings" id="hostStand">${ranked.slice(0,5).map(([id,p],i)=>`<div class="stand-row">
       <span class="rank">${i+1}.</span><span class="av">${p.avatar||'🎮'}</span>
-      <span class="nm">${escapeHtml(p.name)} ${p._lastCorrect?'✅':''}</span><span class="sc">${p.score}</span></div>`).join('')}</div>
-    <button class="btn-primary" id="hostNextBtn">${host.idx+1>=host.qs.length?'Zobrazit výsledky 🏆':'Další otázka →'}</button>`);
+      <span class="nm">${escapeHtml(p.name)} ${p._lastCorrect?'✅':''}${p._lastJoker?' ✨':''}</span><span class="sc">${p.score}</span></div>`).join('')}</div>`;
+  const nextBtn=`<button class="btn-primary" id="hostNextBtn">${host.idx+1>=host.qs.length?'Zobrazit výsledky 🏆':'Další otázka →'}</button>`;
+  if(q.type==='text'){
+    $('hostStage').insertAdjacentHTML('beforeend',
+      `<div class="center scoreline" style="margin-top:14px">Správná odpověď: <b>${escapeHtml(cAns)}</b><br>${correctCount} z ${answeredCount} hráčů správně</div>`+standings+nextBtn);
+  }else{
+    const correctSet=qCorrects(q);
+    document.querySelectorAll('#hostAnswers .answer').forEach(node=>{const i=+node.dataset.oi;
+      if(correctSet.includes(i))node.classList.add('correct');else node.classList.add('dim');});
+    const counts=countSelections();
+    const maxC=Math.max(1,counts[0],counts[1],counts[2],counts[3]);
+    const colors=(q.type==='tf'?['#26890c','#e21b3c']:['#e21b3c','#1368ce','#d89e00','#26890c']);
+    const syms=(q.type==='tf'?['✓','✗']:SYMBOLS);
+    const src=(q.type==='tf'?['Pravda','Lež']:q.options);let bars='';
+    src.forEach((o,i)=>{if(!o||!o.trim())return;bars+=`<div class="distbar ${correctSet.includes(i)?'':'faded'}">
+      <div class="dc-cnt">${counts[i]}${correctSet.includes(i)?' ✓':''}</div>
+      <div class="dc-col" data-h="${Math.round(counts[i]/maxC*100)}" style="height:0%;background:${colors[i]}"></div>
+      <div class="dc-sym" style="color:${colors[i]}">${syms[i]}</div></div>`;});
+    $('hostStage').insertAdjacentHTML('beforeend',`<div class="distchart">${bars}</div>`+standings+nextBtn);
+  }
   requestAnimationFrame(()=>{document.querySelectorAll('#hostStage .dc-col').forEach(c=>c.style.height=c.dataset.h+'%');});
   sfx.correct();
   $('hostNextBtn').onclick=()=>{sfx.click();host.idx++;
@@ -1078,14 +1200,30 @@ function endHost(){
     mpSend(p.conn,{t:'end',leaderboard:board.slice(0,5),yourRank:myRank,yourScore:p.score,total:board.length});});
   launchConfetti();sfx.win();
   $('hostStage').innerHTML=`<h2 class="center">🏆 Konec hry</h2>${podiumHTML(ranked)}
-    <div class="btn-row" style="margin-top:20px">
+    <button class="btn-secondary" id="hostStatsBtn" style="margin-top:14px">📊 Statistiky otázek</button>
+    <div class="stats-box hidden" id="hostStatsBox"></div>
+    <div class="btn-row" style="margin-top:14px">
       <button class="btn-primary" id="hostAgain">↻ Nová hra (stejní hráči)</button>
       <button class="btn-secondary" id="hostHome">🏠 Ukončit</button></div>`;
+  $('hostStatsBtn').onclick=()=>{const box=$('hostStatsBox');
+    if(box.classList.contains('hidden')){box.innerHTML=buildHostStats();box.classList.remove('hidden');$('hostStatsBtn').textContent='🙈 Skrýt statistiky';}
+    else{box.classList.add('hidden');$('hostStatsBtn').textContent='📊 Statistiky otázek';}};
   $('hostAgain').onclick=()=>{sfx.click();
     host.players.forEach(p=>{p.score=0;p.streak=0;p.best=0;p.correct=0;});
-    host.phase='playing';host.idx=0;host.qs=buildQuestionList(host.shuffle,host.count,host.shuffleAns);
+    host.phase='playing';host.idx=0;host.stats=[];host.qs=buildQuestionList(host.shuffle,host.count,host.shuffleAns);
     mpBroadcast({t:'gameStart'});sendHostQuestion();};
   $('hostHome').onclick=()=>{closeHost();show('home');};
+}
+function buildHostStats(){
+  const s=host.stats||[];if(!s.length)return '<p class="muted">Žádná data.</p>';
+  const sorted=s.map((x,i)=>({...x,i})).sort((a,b)=>(a.correct/Math.max(1,a.total))-(b.correct/Math.max(1,b.total)));
+  const hardest=sorted[0],easiest=sorted[sorted.length-1];
+  const rows=s.map((x,i)=>{const pct=Math.round(x.correct/Math.max(1,x.total)*100);
+    return `<div class="stat-row"><div class="sq">${i+1}. ${escapeHtml(x.qtext)}</div>
+      <div class="stat-bar"><div style="width:${pct}%"></div></div>
+      <div class="sp">${x.correct} z ${x.total} správně (${pct} %)</div></div>`;}).join('');
+  const summary=`<p class="scoreline" style="margin-bottom:10px">😈 Nejtěžší: <b>${escapeHtml(hardest.qtext)}</b><br>😎 Nejlehčí: <b>${escapeHtml(easiest.qtext)}</b></p>`;
+  return summary+rows;
 }
 
 //======================================================================
@@ -1102,7 +1240,7 @@ $('joinGoBtn').onclick=()=>{
 function joinGame(pin,name,avatar){
   $('joinStatus').textContent='Připojuji se…';
   closePlayer();
-  player={peer:null,conn:null,name,avatar,pin,connected:false,answered:false,qStart:0,curTime:20};
+  player={peer:null,conn:null,name,avatar,pin,connected:false,answered:false,qStart:0,curTime:20,jokerAvail:true,jokerActive:false};
   prefs.avatar=avatar;savePrefs(prefs);
   const peer=new Peer({debug:1});player.peer=peer;
   peer.on('open',()=>{
@@ -1124,7 +1262,7 @@ function handlePlayerData(d){
     prefs.nick=player.name;savePrefs(prefs);
     showPlayerWait('Jsi ve hře! 🎉','Počkej, až hostitel spustí hru…');show('playStage');}
   else if(d.t==='rejected'){$('joinStatus').textContent='❌ '+(d.reason||'Odmítnuto');closePlayer();}
-  else if(d.t==='gameStart'){showPlayerWait('Připrav se… 🚀','První otázka přijde za okamžik');}
+  else if(d.t==='gameStart'){player.jokerAvail=true;player.jokerActive=false;showPlayerWait('Připrav se… 🚀','První otázka přijde za okamžik');}
   else if(d.t==='question'){showPlayerQuestion(d);}
   else if(d.t==='reveal'){showPlayerReveal(d);}
   else if(d.t==='end'){showPlayerEnd(d);}
@@ -1151,20 +1289,25 @@ function showPlayerQuestion(d){
   countdown(()=>{
     if(!player||player.phase!=='count')return;
     player.phase='answering';
-    const q={q:d.qtext,options:d.options,type:d.type,correct:-1};
+    const q={q:d.qtext,options:d.options||[],type:d.type,answers:d.answers,correct:-1};
+    const jk=player.jokerAvail?`<div class="joker-bar"><button class="joker-btn" id="pJokerBtn">✨ Žolík: 2× body</button></div>`:'';
     $('playStage').innerHTML=head+`<div class="timebar"><div id="pTimeBar"></div></div>`+qhtml+img+
-      `<div class="answers ${d.type==='tf'?'tf':''}" id="pAnswers"></div>`;
-    renderAnswerButtons($('pAnswers'),q,(i,btn)=>playerAnswer(i,btn));
+      `<div class="answers ${d.type==='tf'?'tf':''}" id="pAnswers"></div>`+jk;
+    renderAnswerButtons($('pAnswers'),q,payload=>playerAnswer(payload));
+    const pj=$('pJokerBtn');if(pj)pj.onclick=()=>{if(!player.jokerAvail||player.jokerActive)return;
+      player.jokerActive=true;player.jokerAvail=false;sfx.click();pj.classList.add('active');pj.textContent='✨ Žolík AKTIVNÍ (2×)';};
     const bar=$('pTimeBar');bar.style.transition='none';bar.style.width='100%';
     requestAnimationFrame(()=>{bar.style.transition=`width ${d.time}s linear`;bar.style.width='0%';});
     player.qStart=performance.now();
   });
 }
-function playerAnswer(i,btn){
+function playerAnswer(payload,btn){
   if(player.answered)return;player.answered=true;
   const dt=performance.now()-player.qStart;
-  mpSend(player.conn,{t:'answer',idx:i,dt});
-  document.querySelectorAll('#pAnswers .answer').forEach(n=>{n.onclick=null;if(n!==btn)n.classList.add('dim');});
+  const joker=!!player.jokerActive;player.jokerActive=false;
+  mpSend(player.conn,{t:'answer',payload,dt,joker});
+  document.querySelectorAll('#pAnswers .answer').forEach(n=>{n.onclick=null;});
+  const sb=document.querySelector('#pAnswers .submit-bar');if(sb){sb.disabled=true;sb.style.opacity='.5';}
   sfx.click();
   setTimeout(()=>{$('playStage').innerHTML=`<div class="you-name">${player.avatar||''} ${escapeHtml(player.name)}</div>
     <div class="wait-big"><div class="ico">✅</div><div class="t">Odpověď odeslána!</div>
@@ -1172,15 +1315,15 @@ function playerAnswer(i,btn){
 }
 function showPlayerReveal(d){
   player.phase='reveal';
-  const correct=d.yourIdx===d.correct && d.yourIdx>=0;
+  const correct=!!d.correct;
   if(correct)sfx.correct();else sfx.wrong();
   const dlt=d.rankDelta||0;
   const arrow=dlt>0?`<span class="rank-arrow up">▲${dlt}</span>`
     :dlt<0?`<span class="rank-arrow down">▼${-dlt}</span>`:`<span class="rank-arrow same">—</span>`;
   $('playStage').innerHTML=`<div class="feedback" style="padding:30px 10px">
-    <div class="fb-emoji">${correct?'🎉':(d.yourIdx<0?'⏰':'😬')}</div>
-    <div class="fb-title" style="color:${correct?'var(--ok)':'var(--bad)'}">${correct?'Správně!':(d.yourIdx<0?'Nestihl jsi':'Špatně')}</div>
-    ${correct?`<div class="gain">+${d.gained} bodů</div>`:`<p class="scoreline">Správně: <b>${escapeHtml(d.correctAns)}</b></p>`}
+    <div class="fb-emoji">${correct?'🎉':(d.timedOut?'⏰':'😬')}</div>
+    <div class="fb-title" style="color:${correct?'var(--ok)':'var(--bad)'}">${correct?'Správně!':(d.timedOut?'Nestihl jsi':'Špatně')}</div>
+    ${correct?`<div class="gain">+${d.gained} bodů</div>${d.joker?'<div class="joker-tag">✨ ŽOLÍK 2×!</div>':''}`:`<p class="scoreline">Správně: <b>${escapeHtml(d.correctAns)}</b></p>`}
     <div class="big-num" style="margin-top:10px">${d.score} b.</div>
     <p class="scoreline">${d.rank}. místo z ${d.total} ${arrow}</p></div>`;
   show('playStage');
@@ -1205,23 +1348,38 @@ function renderQList(){
   const list=sets[editingSet],wrap=$('qList');wrap.innerHTML='';
   if(!list.length)wrap.innerHTML='<p class="muted">Zatím žádné otázky — přidej první níže.</p>';
   list.forEach((q,qi)=>{
-    const item=document.createElement('div');item.className='q-item';const isTF=q.type==='tf';let opts;
-    if(isTF){opts=['Pravda','Lež'].map((o,i)=>`<div class="opt-edit">
-        <input type="radio" name="corr_${qi}" ${q.correct===i?'checked':''} data-q="${qi}" data-opt="${i}" class="corr-radio" title="Správná odpověď">
-        <span class="tag ${i===0?'a3':'a0'}"></span><span style="font-weight:700">${o}</span></div>`).join('');
-    }else{while(q.options.length<4)q.options.push('');
-      opts=q.options.slice(0,4).map((o,i)=>`<div class="opt-edit">
-        <input type="radio" name="corr_${qi}" ${q.correct===i?'checked':''} data-q="${qi}" data-opt="${i}" class="corr-radio" title="Správná odpověď">
-        <span class="tag a${i}"></span>
-        <input type="text" value="${escapeAttr(o)}" placeholder="Odpověď ${i+1}${i>1?' (nepovinná)':''}" data-q="${qi}" data-opt="${i}" class="opt-input"></div>`).join('');}
+    const item=document.createElement('div');item.className='q-item';const type=q.type||'abcd';let body='';
+    if(type==='text'){
+      const answers=(q.answers&&q.answers.length?q.answers:(q.answers=['']));
+      body=`<label style="margin-top:4px">Uznávané odpovědi (nezáleží na velikosti písmen ani diakritice):</label>`+
+        answers.map((a,ai)=>`<div class="ta-row"><span class="ic">✓</span>
+          <input type="text" value="${escapeAttr(a)}" placeholder="Správná odpověď ${ai+1}" data-taq="${qi}" data-tai="${ai}" class="ta-input"></div>`).join('')+
+        `<button class="mini btn-secondary" data-addans="${qi}" style="width:auto;flex:none">＋ Další uznávaná odpověď</button>`;
+    }else if(type==='tf'){
+      body=`<label style="margin-top:4px">Vyber správnou možnost:</label>`+
+        ['Pravda','Lež'].map((o,i)=>`<div class="opt-edit">
+          <input type="radio" name="corr_${qi}" ${q.correct===i?'checked':''} data-q="${qi}" data-opt="${i}" class="corr-radio">
+          <span class="tag ${i===0?'a3':'a0'}"></span><span style="font-weight:700">${o}</span></div>`).join('');
+    }else{
+      while(q.options.length<4)q.options.push('');const isMulti=type==='multi';const corrects=q.corrects||[];
+      body=`<label style="margin-top:4px">${isMulti?'Zaškrtni VŠECHNY správné:':'Vyber tečkou správnou odpověď:'}</label>`+
+        q.options.slice(0,4).map((o,i)=>`<div class="opt-edit">
+          <input type="${isMulti?'checkbox':'radio'}" name="corr_${qi}" ${isMulti?(corrects.includes(i)?'checked':''):(q.correct===i?'checked':'')} data-q="${qi}" data-opt="${i}" class="${isMulti?'corr-check':'corr-radio'}">
+          <span class="tag a${i}"></span>
+          <input type="text" value="${escapeAttr(o)}" placeholder="Odpověď ${i+1}${i>1?' (nepovinná)':''}" data-q="${qi}" data-opt="${i}" class="opt-input"></div>`).join('');
+    }
     item.innerHTML=`<div class="q-head"><h4>Otázka ${qi+1}
-        <span class="type-seg"><button data-type="abcd" data-q="${qi}" class="${!isTF?'on':''}">ABCD</button>
-        <button data-type="tf" data-q="${qi}" class="${isTF?'on':''}">Pravda/Lež</button></span></h4>
+        <span class="type-seg">
+          <button data-type="abcd" data-q="${qi}" class="${type==='abcd'?'on':''}">ABCD</button>
+          <button data-type="tf" data-q="${qi}" class="${type==='tf'?'on':''}">Ano/Ne</button>
+          <button data-type="multi" data-q="${qi}" class="${type==='multi'?'on':''}">Více</button>
+          <button data-type="text" data-q="${qi}" class="${type==='text'?'on':''}">Text</button>
+        </span></h4>
         <button class="mini danger" data-del="${qi}">Smazat</button></div>
       <input type="text" value="${escapeAttr(q.q)}" placeholder="Text otázky" data-qtext="${qi}" class="qtext-input">
       <input type="text" value="${escapeAttr(q.image||'')}" placeholder="🖼 URL obrázku (nepovinné)" data-qimg="${qi}" class="qimg-input">
       <img class="qimg-prev ${q.image?'':'hidden'}" data-qimgprev="${qi}" src="${escapeAttr(q.image||'')}" onerror="this.classList.add('hidden')">
-      <label style="margin-top:4px">${isTF?'Vyber správnou možnost:':'Vyber tečkou správnou odpověď:'}</label>${opts}`;
+      ${body}`;
     wrap.appendChild(item);
   });
   wrap.querySelectorAll('.qtext-input').forEach(i=>i.oninput=e=>sets[editingSet][+e.target.dataset.qtext].q=e.target.value);
@@ -1229,21 +1387,43 @@ function renderQList(){
     const prev=wrap.querySelector('[data-qimgprev="'+qi+'"]');if(prev){if(e.target.value.trim()){prev.src=e.target.value;prev.classList.remove('hidden');}else prev.classList.add('hidden');}});
   wrap.querySelectorAll('.opt-input').forEach(i=>i.oninput=e=>sets[editingSet][+e.target.dataset.q].options[+e.target.dataset.opt]=e.target.value);
   wrap.querySelectorAll('.corr-radio').forEach(r=>r.onchange=e=>sets[editingSet][+e.target.dataset.q].correct=+e.target.dataset.opt);
+  wrap.querySelectorAll('.corr-check').forEach(c=>c.onchange=e=>{const q=sets[editingSet][+e.target.dataset.q],oi=+e.target.dataset.opt;
+    const s=new Set(q.corrects||[]);if(e.target.checked)s.add(oi);else s.delete(oi);q.corrects=[...s].sort((a,b)=>a-b);});
+  wrap.querySelectorAll('.ta-input').forEach(i=>i.oninput=e=>{sets[editingSet][+e.target.dataset.taq].answers[+e.target.dataset.tai]=e.target.value;});
+  wrap.querySelectorAll('[data-addans]').forEach(b=>b.onclick=e=>{sets[editingSet][+e.target.dataset.addans].answers.push('');renderQList();});
   wrap.querySelectorAll('[data-del]').forEach(b=>b.onclick=e=>{sets[editingSet].splice(+e.target.dataset.del,1);renderQList()});
   wrap.querySelectorAll('[data-type]').forEach(b=>b.onclick=e=>{
     const qi=+e.target.dataset.q,type=e.target.dataset.type,q=sets[editingSet][qi];
-    if(type==='tf'){q.type='tf';q.options=['Pravda','Lež'];if(q.correct>1)q.correct=0;}
-    else{delete q.type;while(q.options.length<4)q.options.push('');}renderQList();});
+    if(type==='tf'){q.type='tf';q.options=['Pravda','Lež'];if(q.correct>1)q.correct=0;delete q.corrects;delete q.answers;}
+    else if(type==='multi'){q.type='multi';while(q.options.length<4)q.options.push('');if(!q.corrects)q.corrects=(q.correct!=null?[q.correct]:[]);delete q.answers;}
+    else if(type==='text'){q.type='text';if(!q.answers||!q.answers.length)q.answers=[''];}
+    else{delete q.type;while(q.options.length<4)q.options.push('');delete q.corrects;delete q.answers;}
+    renderQList();});
 }
 $('addQBtn').onclick=()=>{sets[editingSet].push({q:'',options:['','','',''],correct:0});renderQList();
   $('qList').lastElementChild.scrollIntoView({behavior:'smooth',block:'center'})};
 $('saveSetBtn').onclick=()=>{
   const newName=$('setNameInput').value.trim();if(!newName){toast('Zadej název sady');return;}
-  const clean=sets[editingSet].filter(q=>q.q.trim()!==''&&q.options.filter(o=>o.trim()!=='').length>=2)
-    .map(q=>{const opts=q.options.map(o=>o.trim());let c=q.correct;if(!opts[c]||!opts[c].trim()){c=opts.findIndex(o=>o.trim()!=='');}
-      const out={q:q.q.trim(),options:opts,correct:Math.max(0,c)};
-      if(q.image&&q.image.trim())out.image=q.image.trim();
-      if(q.type==='tf'){out.type='tf';out.options=['Pravda','Lež'];out.correct=q.correct>1?0:q.correct;}return out;});
+  const src=sets[editingSet],clean=[];
+  src.forEach(q=>{
+    const type=q.type||'abcd';if(!q.q||!q.q.trim())return;
+    const base={q:q.q.trim()};if(q.image&&q.image.trim())base.image=q.image.trim();
+    if(type==='text'){
+      const answers=(q.answers||[]).map(a=>(a||'').trim()).filter(a=>a!=='');
+      if(!answers.length)return;clean.push(Object.assign(base,{type:'text',options:[],answers}));
+    }else if(type==='tf'){
+      clean.push(Object.assign(base,{type:'tf',options:['Pravda','Lež'],correct:q.correct>1?0:(q.correct||0)}));
+    }else if(type==='multi'){
+      const opts=(q.options||[]).map(o=>(o||'').trim());
+      const corrects=(q.corrects||[]).filter(i=>opts[i]&&opts[i]!=='');
+      if(opts.filter(o=>o!=='').length<2||corrects.length<1)return;
+      clean.push(Object.assign(base,{type:'multi',options:opts,corrects:corrects.slice().sort((a,b)=>a-b)}));
+    }else{
+      const opts=(q.options||[]).map(o=>(o||'').trim());if(opts.filter(o=>o!=='').length<2)return;
+      let c=q.correct||0;if(!opts[c]||!opts[c].trim())c=opts.findIndex(o=>o.trim()!=='');
+      clean.push(Object.assign(base,{options:opts,correct:Math.max(0,c)}));
+    }
+  });
   if(clean.length!==sets[editingSet].length&&!confirm('Některé otázky jsou neúplné a budou vynechány. Pokračovat?'))return;
   if(newName!==editingSet){if(sets[newName]){toast('Sada s tímto názvem už existuje');return;}delete sets[editingSet];}
   sets[newName]=clean;saveSets(sets);selectedSet=newName;renderSetGrid();show('pickset');toast('Uloženo ✓');
@@ -1259,7 +1439,8 @@ $('backHome2').onclick=()=>{saveSets(sets);renderSetGrid();show('pickset')};
 //=================== KEYBOARD ===================
 document.addEventListener('keydown',e=>{
   if(!$('quiz').classList.contains('hidden')&&game&&!game.locked){
-    const n=parseInt(e.key);if(n>=1&&n<=4){const b=document.querySelectorAll('#answers .answer');if(b[n-1])b[n-1].click();}}
+    const n=parseInt(e.key);if(n>=1&&n<=4){const b=document.querySelectorAll('#answers .answer');if(b[n-1])b[n-1].click();}
+    if(e.key==='Enter'){const sb=document.querySelector('#answers .submit-bar');if(sb&&!sb.disabled){e.preventDefault();sb.click();}}}
   if(!$('feedback').classList.contains('hidden')&&(e.key==='Enter'||e.key===' ')){e.preventDefault();$('nextBtn').click();}
   if(!$('playStage').classList.contains('hidden')&&player&&!player.answered){
     const n=parseInt(e.key);const b=document.querySelectorAll('#pAnswers .answer');if(n>=1&&n<=4&&b[n-1])b[n-1].click();}
