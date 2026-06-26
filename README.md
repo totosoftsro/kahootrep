@@ -5,11 +5,18 @@ Kvízová hra ve stylu Kahoot. **Bez databáze, bez vlastního serveru** — cel
 - 🎮 **Na jednom zařízení** – 1–8 hráčů na střídačku (funguje i offline)
 - 📡 **Hostit online hru** – vygeneruje se PIN + QR kód, ostatní se připojí na mobilu
 - 📱 **Připojit se** – zadáš PIN (nebo naskenuješ QR) a hraješ na svém telefonu
-- ✏️ Editor vlastních sad otázek (ABCD i Pravda/Lež), export/import do `.json`
-- 🌙 Tmavý režim, zvuky, konfety, žebříček, sloupcový graf odpovědí
+- ✏️ Editor vlastních sad otázek se **4 typy otázek** (ABCD, Ano/Ne, Více správných, Textová), obrázky k otázkám, export/import do `.json`
+- 👥 **Týmový režim** (2–4 týmy), ✨ **žolík 2×**, 📊 statistiky po hře, 🏅 osobní rekordy, avatary hráčů
+- 🌙 Tmavý režim, zvuky/hudba, konfety, žebříček, sloupcový graf odpovědí
+- ♿ Ovládání klávesnicí, viditelný fokus, `aria-live` a podpora `prefers-reduced-motion`
 
 Online režim funguje přes **WebRTC (PeerJS)** — hráči se spojí přímo mezi sebou,
 stav hry žije jen v prohlížeči hostitele. Žádná data se nikam neukládají.
+
+> ℹ️ **Poznámka k bezpečnosti:** online režim je bez serveru a bez přihlašování —
+> herní PIN je krátký, takže je vhodný pro hraní ve třídě, ne pro soutěže s odměnami.
+> Hostitel měří čas a vyhodnocuje skóre lokálně; vstupy hráčů se ošetřují, ale plnou
+> ochranu proti podvádění by zajistil až server.
 
 ---
 
