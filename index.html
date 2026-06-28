@@ -1358,7 +1358,7 @@ function showPlayerMsg(ico,msg){
 }
 function showPlayerQuestion(d){
   player.answered=false;player.phase='count';
-  const head=`<div class="you-name">${player.avatar||''} ${escapeHtml(player.name)} <span style="color:#999;font-weight:600">• otázka ${d.n}/${d.total}</span></div>`;
+  const head=`<div class="you-name">${player.avatar||''} ${escapeHtml(player.name)} <span style="color:#999;font-weight:600">• otázka ${num(d.n)}/${num(d.total)}</span></div>`;
   const qhtml=`<div class="question-text" style="min-height:auto;padding:10px 4px;font-size:1.15rem">${escapeHtml(d.qtext)}</div>`;
   const img=d.image?`<div class="q-image"><img src="${escapeAttr(d.image)}" alt="Obrázek k otázce" onerror="this.parentNode.style.display='none'"></div>`:'';
   $('playStage').innerHTML=head+qhtml+img+`<div class="center scoreline" style="opacity:.6">Přečti si otázku…</div>`;
@@ -1374,7 +1374,7 @@ function showPlayerQuestion(d){
     const pj=$('pJokerBtn');if(pj)pj.onclick=()=>{if(!player.jokerAvail||player.jokerActive)return;
       player.jokerActive=true;player.jokerAvail=false;sfx.click();pj.classList.add('active');pj.textContent='✨ Žolík AKTIVNÍ (2×)';};
     const bar=$('pTimeBar');bar.style.transition='none';bar.style.width='100%';
-    requestAnimationFrame(()=>{bar.style.transition=`width ${d.time}s linear`;bar.style.width='0%';});
+    requestAnimationFrame(()=>{bar.style.transition=`width ${num(d.time)}s linear`;bar.style.width='0%';});
     player.qStart=performance.now();
   });
 }
